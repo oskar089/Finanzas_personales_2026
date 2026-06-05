@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Finanzas Personales 2026</title>
+    <!-- Bootstrap 5.3 por CDN -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body class="bg-light">
+
+    <nav class="navbar navbar-dark bg-dark mb-4">
+        <div class="container">
+            <span class="navbar-brand mb-0 h1">💰 Finanzas Personales 2026</span>
+            <span class="navbar-text text-white-50" id="totalHeader">Total: $0</span>
+        </div>
+    </nav>
+
+    <main class="container">
+
+        <!-- Formulario de carga -->
+        <section class="card shadow-sm mb-4">
+            <div class="card-body">
+                <h2 class="h5 card-title mb-3">Cargar gasto</h2>
+                <form id="formGasto" class="row g-3">
+                    <div class="col-md-3">
+                        <label for="monto" class="form-label">Monto</label>
+                        <input type="number" class="form-control" id="monto" step="0.01" min="0" required>
+                    </div>
+                    <div class="col-md-3">
+                        <label for="categoria" class="form-label">Categoría</label>
+                        <select id="categoria" class="form-select" required>
+                            <!-- Se llena desde JS con la constante CATEGORIAS -->
+                        </select>
+                    </div>
+                    <div class="col-md-4">
+                        <label for="descripcion" class="form-label">Descripción</label>
+                        <input type="text" class="form-control" id="descripcion" maxlength="100" placeholder="Ej: café con medialunas">
+                    </div>
+                    <div class="col-md-2">
+                        <label for="fecha" class="form-label">Fecha</label>
+                        <input type="date" class="form-control" id="fecha" required>
+                    </div>
+                    <div class="col-12">
+                        <button type="submit" class="btn btn-primary">Guardar gasto</button>
+                        <button type="button" id="btnExportar" class="btn btn-outline-secondary ms-2">Exportar CSV</button>
+                    </div>
+                </form>
+            </div>
+        </section>
+
+        <!-- Filtros -->
+        <section class="card shadow-sm mb-4">
+            <div class="card-body">
+                <div class="row g-3 align-items-end">
+                    <div class="col-md-4">
+                        <label for="filtroCategoria" class="form-label">Filtrar por categoría</label>
+                        <select id="filtroCategoria" class="form-select">
+                            <option value="">Todas</option>
+                        </select>
+                    </div>
+                    <div class="col-md-4">
+                        <label for="filtroMes" class="form-label">Filtrar por mes</label>
+                        <input type="month" id="filtroMes" class="form-control">
+                    </div>
+                    <div class="col-md-4">
+                        <button type="button" id="btnLimpiarFiltros" class="btn btn-outline-secondary w-100">Limpiar filtros</button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Resumen -->
+        <section class="row g-3 mb-4">
+            <div class="col-md-4">
+                <div class="card text-bg-primary shadow-sm">
+                    <div class="card-body">
+                        <h3 class="h6">Total del mes</h3>
+                        <p class="display-6 mb-0" id="totalMes">$0</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card text-bg-success shadow-sm">
+                    <div class="card-body">
+                        <h3 class="h6">Cantidad de gastos</h3>
+                        <p class="display-6 mb-0" id="cantidadGastos">0</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card text-bg-info shadow-sm">
+                    <div class="card-body">
+                        <h3 class="h6">Promedio por gasto</h3>
+                        <p class="display-6 mb-0" id="promedioGasto">$0</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Lista de gastos -->
+        <section class="card shadow-sm">
+            <div class="card-body">
+                <h2 class="h5 card-title mb-3">Gastos</h2>
+                <div class="table-responsive">
+                    <table class="table table-striped table-hover align-middle">
+                        <thead>
+                            <tr>
+                                <th>Fecha</th>
+                                <th>Categoría</th>
+                                <th>Descripción</th>
+                                <th class="text-end">Monto</th>
+                                <th class="text-end">Acción</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tablaGastos">
+                            <!-- Se llena desde JS -->
+                        </tbody>
+                    </table>
+                </div>
+                <p id="mensajeVacio" class="text-muted text-center my-4 d-none">
+                    No hay gastos cargados todavía. ¡Empezá por el formulario de arriba! 👆
+                </p>
+            </div>
+        </section>
+
+    </main>
+
+    <footer class="container text-center text-muted py-4">
+        <small>Datos guardados en tu navegador (localStorage). Nada sale de acá.</small>
+    </footer>
+
+    <script src="app.js"></script>
+</body>
+</html>

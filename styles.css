@@ -1,0 +1,25 @@
+/* Ajustes propios sobre Bootstrap.
+   El objetivo es solo afinar lo que Bootstrap no cubre por defecto. */
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+.card {
+    border: none;
+}
+
+#tablaGastos td {
+    vertical-align: middle;
+}
+
+.monto {
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+}
+
+/* Que el total del header se vea prolijo y destacado */
+#totalHeader {
+    font-weight: 600;
+    font-size: 1.1rem;
+}
