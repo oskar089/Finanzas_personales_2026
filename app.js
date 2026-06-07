@@ -95,6 +95,67 @@ function generateId() {
     return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 }
 
+// --- Auto-categorización con IA local (Ollama) -------------------
+
+async function autoCategorize() {
+    const desc = document.getElementById('description').value.trim();
+    if (!desc) {
+        alert('Escribí una descripción primero.');
+        return;
+    }
+
+    const btn = document.getElementById('btnAutoCat');
+    btn.disabled = true;
+    btn.textContent = '🤔 Pensando...';
+
+    const categories = getAllCategories().map(c => `"${c}"`).join(', ');
+
+    try {
+        const res = await fetch('http://localhost:11434/api/generate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                model: 'gemma4',
+                prompt: `Sos un asistente financiero. Clasificá este gasto o ingreso en UNA de estas categorías: ${categories}.
+Descripción: "${desc}"
+Respondé SOLO con el nombre exacto de la categoría, sin puntos ni explicaciones.`,
+                stream: false,
+                options: { temperature: 0.1, max_tokens: 20 }
+            })
+        });
+
+        if (!res.ok) throw new Error(`Ollama respondió ${res.status}`);
+
+        const data = await res.json();
+        const suggestion = data.response.trim();
+
+        // Buscar coincidencia exacta o parcial en las categorías
+        const match = getAllCategories().find(
+            c => c.toLowerCase() === suggestion.toLowerCase()
+        );
+
+        if (match) {
+            document.getElementById('category').value = match;
+        } else {
+            // Coincidencia parcial
+            const partial = getAllCategories().find(
+                c => suggestion.toLowerCase().includes(c.toLowerCase()) || c.toLowerCase().includes(suggestion.toLowerCase())
+            );
+            if (partial) {
+                document.getElementById('category').value = partial;
+            } else {
+                alert(`Gemma 4 sugirió "${suggestion}" pero no coincide con ninguna categoría. Seleccioná manual.`);
+            }
+        }
+    } catch (err) {
+        console.error('Error con Ollama:', err);
+        alert('No se pudo conectar con Gemma 4. ¿Está corriendo Ollama? (ollama serve)');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = '🧠 Auto';
+    }
+}
+
 // --- CRUD ---------------------------------------------------------
 
 function addEntry({ tipo, amount, category, description, date }) {
@@ -480,6 +541,9 @@ function init() {
 
     // Cancelar edición
     document.getElementById('btnCancelEdit').addEventListener('click', cancelEdit);
+
+    // Auto-categorizar con IA
+    document.getElementById('btnAutoCat').addEventListener('click', autoCategorize);
 
     // Filtros
     document.getElementById('filterType').addEventListener('change', (e) => {
