@@ -16,3 +16,6 @@ npm-debug.log*
 # Build outputs
 dist/
 build/
+
+# Test coverage
+coverage/

@@ -19,3 +19,9 @@
 - Comentarios en español (este proyecto es personal y en español).
 - Nombres de variables y funciones en español o inglés, pero ser consistente.
 - Una sola fuente de verdad en el estado de la app.
+
+## Testing
+- Tests con Vitest + jsdom en `src/**/*.test.js`.
+- Las funciones puras de `src/finance.js` son la superficie de prueba.
+- No se testea UI ni DOM — solo lógica de negocio.
+- Test runner: `npx vitest run`.
