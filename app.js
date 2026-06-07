@@ -45,6 +45,17 @@ function guardarEnStorage() {
 
 // --- Helpers ------------------------------------------------------
 
+function escaparHTML(str) {
+    // Escapa caracteres que rompen innerHTML cuando vienen de input del usuario.
+    // Importante si en el futuro se sincroniza con servicios externos o se importa CSV.
+    return String(str ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
 function formatearMonto(n) {
     // Formato argentino: separador de miles con punto, decimales con coma.
     return '$' + n.toFixed(2).replace('.', ',').replace(/\B(?=(\d{3})+(?!\d))/g, '.');
@@ -131,12 +142,12 @@ function renderTabla() {
 
     tbody.innerHTML = ordenados.map(g => `
         <tr>
-            <td>${g.fecha}</td>
-            <td><span class="badge bg-secondary">${g.categoria}</span></td>
-            <td>${g.descripcion || '<span class="text-muted">—</span>'}</td>
+            <td>${escaparHTML(g.fecha)}</td>
+            <td><span class="badge bg-secondary">${escaparHTML(g.categoria)}</span></td>
+            <td>${g.descripcion ? escaparHTML(g.descripcion) : '<span class="text-muted">—</span>'}</td>
             <td class="text-end monto">${formatearMonto(g.monto)}</td>
             <td class="text-end">
-                <button class="btn btn-sm btn-outline-danger" data-id="${g.id}" data-action="borrar">
+                <button class="btn btn-sm btn-outline-danger" data-id="${escaparHTML(g.id)}" data-action="borrar">
                     Borrar
                 </button>
             </td>
