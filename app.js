@@ -371,6 +371,70 @@ function exportCSV() {
     URL.revokeObjectURL(url);
 }
 
+// --- Exportar / Importar JSON ------------------------------------
+
+function exportJSON() {
+    if (entries.length === 0) {
+        alert('No hay movimientos para exportar.');
+        return;
+    }
+
+    const data = {
+        version: 2,
+        exportedAt: todayISO(),
+        entries
+    };
+
+    const json = JSON.stringify(data, null, 2);
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `finanzas-${todayISO()}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+}
+
+function importJSON(file) {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        try {
+            const data = JSON.parse(e.target.result);
+
+            // Validar estructura
+            if (!data.entries || !Array.isArray(data.entries)) {
+                alert('El archivo no tiene datos válidos. Tiene que ser un JSON exportado desde esta app.');
+                return;
+            }
+
+            const incoming = data.entries.map(entry => ({
+                ...entry,
+                tipo: entry.tipo || 'expense'
+            }));
+
+            if (incoming.length === 0) {
+                alert('El archivo no contiene movimientos.');
+                return;
+            }
+
+            const msg = `¿Reemplazar todos los datos actuales (${entries.length} movimientos) con los del archivo (${incoming.length} movimientos)?`;
+            if (!confirm(msg)) return;
+
+            entries = incoming;
+            saveToStorage();
+            render();
+            alert(`Importados ${incoming.length} movimientos correctamente.`);
+        } catch (err) {
+            alert('Error al leer el archivo. Asegurate de que sea un JSON válido exportado desde esta app.');
+            console.error('Import error:', err);
+        }
+    };
+    reader.readAsText(file);
+}
+
 // --- Eventos ------------------------------------------------------
 
 function init() {
@@ -458,7 +522,21 @@ function init() {
     document.getElementById('btnDarkMode').addEventListener('click', toggleDarkMode);
 
     // Exportar CSV
-    document.getElementById('btnExport').addEventListener('click', exportCSV);
+    document.getElementById('btnExportCSV').addEventListener('click', exportCSV);
+
+    // Exportar JSON
+    document.getElementById('btnExportJSON').addEventListener('click', exportJSON);
+
+    // Importar JSON
+    document.getElementById('btnImportJSON').addEventListener('click', () => {
+        document.getElementById('fileInputJSON').click();
+    });
+    document.getElementById('fileInputJSON').addEventListener('change', (e) => {
+        if (e.target.files.length > 0) {
+            importJSON(e.target.files[0]);
+            e.target.value = ''; // permitir re-importar el mismo archivo
+        }
+    });
 }
 
 // Arranca cuando el DOM está listo
