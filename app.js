@@ -67,13 +67,14 @@ function generarId() {
 // --- Altas, bajas, modificaciones ---------------------------------
 
 function agregarGasto({ monto, categoria, descripcion, fecha }) {
-    gastos.push({
+    const nuevoGasto = {
         id: generarId(),
         monto: Number(monto),
         categoria,
         descripcion: descripcion.trim(),
         fecha
-    });
+    };
+    gastos = [...gastos, nuevoGasto];
     guardarEnStorage();
     render();
 }
