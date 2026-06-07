@@ -2,17 +2,18 @@
 // FINANZAS PERSONALES 2026 - Lógica de la app
 // =====================================================================
 // Decisiones de diseño:
-// - Una sola fuente de verdad: el array `expenses` en memoria.
-// - localStorage se sincroniza en cada cambio (alta o baja).
+// - Una sola fuente de verdad: el array `entries` en memoria.
+// - localStorage se sincroniza en cada cambio (alta, baja o modificación).
 // - La UI se re-renderiza completa desde el array, no por parche.
-// - Categorías centralizadas en una constante para no hardcodear.
+// - Datos legacy sin `tipo` se tratan como 'expense' (backward compat).
 // =====================================================================
 
 // --- Constantes ---------------------------------------------------
 
 const STORAGE_KEY = 'finanzas:gastos:v1';
+const DARK_MODE_KEY = 'finanzas:dark-mode';
 
-const CATEGORIES = [
+const EXPENSE_CATEGORIES = [
     'Comida',
     'Transporte',
     'Hogar',
@@ -21,33 +22,49 @@ const CATEGORIES = [
     'Otro'
 ];
 
+const INCOME_CATEGORIES = [
+    'Sueldo',
+    'Freelance',
+    'Inversiones',
+    'Varios'
+];
+
+function getAllCategories() {
+    // Unifica categorías de gasto e ingreso, sin duplicar 'Otro' y 'Varios'
+    const set = new Set([...EXPENSE_CATEGORIES, ...INCOME_CATEGORIES]);
+    return [...set];
+}
+
 // --- Estado -------------------------------------------------------
 
-let expenses = [];          // fuente de verdad en memoria
+let entries = [];           // fuente de verdad en memoria
+let filterType = '';        // '' | 'expense' | 'income'
 let filterCategory = '';    // '' = todas
 let filterMonth = '';       // '' = todos, formato YYYY-MM
+let editingId = null;       // null = nuevo, string = editando
 
 // --- Persistencia -------------------------------------------------
 
 function loadFromStorage() {
     try {
         const raw = localStorage.getItem(STORAGE_KEY);
-        expenses = raw ? JSON.parse(raw) : [];
+        entries = raw ? JSON.parse(raw) : [];
+        // Backward compat: entries sin `tipo` son 'expense'
+        entries = entries.map(e => ({ ...e, tipo: e.tipo || 'expense' }));
     } catch (err) {
         console.error('No se pudo leer localStorage, arrancamos vacíos.', err);
-        expenses = [];
+        entries = [];
     }
 }
 
 function saveToStorage() {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(expenses));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
 }
 
 // --- Helpers ------------------------------------------------------
 
 function escapeHTML(str) {
     // Escapa caracteres que rompen innerHTML cuando vienen de input del usuario.
-    // Importante si en el futuro se sincroniza con servicios externos o se importa CSV.
     return String(str ?? '')
         .replace(/&/g, '&amp;')
         .replace(/</g, '&lt;')
@@ -58,7 +75,6 @@ function escapeHTML(str) {
 
 function formatAmount(n) {
     // Formato argentino: separador de miles con punto, decimales con coma.
-    // toLocaleString maneja locales y casos borde mejor que regex encadenadas.
     return '$' + Number(n).toLocaleString('es-AR', {
         minimumFractionDigits: 2,
         maximumFractionDigits: 2
@@ -79,24 +95,35 @@ function generateId() {
     return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 }
 
-// --- Altas, bajas, modificaciones ---------------------------------
+// --- CRUD ---------------------------------------------------------
 
-function addExpense({ amount, category, description, date }) {
-    const newExpense = {
+function addEntry({ tipo, amount, category, description, date }) {
+    const newEntry = {
         id: generateId(),
+        tipo,
         monto: Number(amount),
         categoria: category,
         descripcion: description.trim(),
         fecha: date
     };
-    expenses = [...expenses, newExpense];
+    entries = [...entries, newEntry];
     saveToStorage();
     render();
 }
 
-function deleteExpense(id) {
-    if (!confirm('¿Borrar este gasto?')) return;
-    expenses = expenses.filter(e => e.id !== id);
+function updateEntry({ id, tipo, amount, category, description, date }) {
+    entries = entries.map(e =>
+        e.id === id
+            ? { ...e, tipo, monto: Number(amount), categoria: category, descripcion: description.trim(), fecha: date }
+            : e
+    );
+    saveToStorage();
+    render();
+}
+
+function deleteEntry(id) {
+    if (!confirm('¿Borrar este movimiento?')) return;
+    entries = entries.filter(e => e.id !== id);
     saveToStorage();
     render();
 }
@@ -104,29 +131,52 @@ function deleteExpense(id) {
 // --- Filtros ------------------------------------------------------
 
 function applyFilters() {
-    return expenses.filter(e => {
+    return entries.filter(e => {
+        const passesType = !filterType || e.tipo === filterType;
         const passesCategory = !filterCategory || e.categoria === filterCategory;
         const passesMonth = !filterMonth || e.fecha.startsWith(filterMonth);
-        return passesCategory && passesMonth;
+        return passesType && passesCategory && passesMonth;
     });
 }
 
-// --- Render -------------------------------------------------------
+// --- Render: Formulario -------------------------------------------
 
 function renderCategories() {
     const select = document.getElementById('category');
-    const filter = document.getElementById('filterCategory');
-
-    // Carga el <select> del formulario
-    select.innerHTML = CATEGORIES
-        .map(c => `<option value="${c}">${c}</option>`)
-        .join('');
-
-    // Carga el <select> del filtro, agregando "Todas" como primera opción
-    filter.innerHTML =
-        '<option value="">Todas</option>' +
-        CATEGORIES.map(c => `<option value="${c}">${c}</option>`).join('');
+    const cats = getAllCategories();
+    select.innerHTML = cats.map(c => `<option value="${c}">${c}</option>`).join('');
 }
+
+function enterEditMode(entry) {
+    editingId = entry.id;
+    document.getElementById('formTitle').textContent = 'Editar movimiento';
+    document.getElementById('btnSubmit').textContent = 'Actualizar';
+    document.getElementById('btnCancelEdit').classList.remove('d-none');
+
+    // Setear tipo radio
+    document.getElementById(entry.tipo === 'income' ? 'tipoIncome' : 'tipoExpense').checked = true;
+
+    // Setear valores
+    document.getElementById('amount').value = entry.monto;
+    document.getElementById('category').value = entry.categoria;
+    document.getElementById('description').value = entry.descripcion;
+    document.getElementById('date').value = entry.fecha;
+
+    // Scroll al formulario
+    document.getElementById('expenseForm').scrollIntoView({ behavior: 'smooth' });
+}
+
+function cancelEdit() {
+    editingId = null;
+    document.getElementById('formTitle').textContent = 'Cargar movimiento';
+    document.getElementById('btnSubmit').textContent = 'Guardar';
+    document.getElementById('btnCancelEdit').classList.add('d-none');
+    document.getElementById('expenseForm').reset();
+    document.getElementById('date').value = todayISO();
+    document.getElementById('tipoExpense').checked = true;
+}
+
+// --- Render: Tabla ------------------------------------------------
 
 function renderTable() {
     const tbody = document.getElementById('expensesTable');
@@ -144,65 +194,177 @@ function renderTable() {
     // Ordenamos por fecha descendente (más reciente arriba)
     const sorted = [...filtered].sort((a, b) => b.fecha.localeCompare(a.fecha));
 
-    tbody.innerHTML = sorted.map(e => `
+    tbody.innerHTML = sorted.map(e => {
+        const isIncome = e.tipo === 'income';
+        const badgeClass = isIncome ? 'bg-success' : 'bg-danger';
+        const badgeText = isIncome ? '💰 Ingreso' : '💸 Gasto';
+        const montoClass = isIncome ? 'text-success fw-bold' : 'monto';
+
+        return `
         <tr>
             <td>${escapeHTML(e.fecha)}</td>
+            <td><span class="badge ${badgeClass}">${badgeText}</span></td>
             <td><span class="badge bg-secondary">${escapeHTML(e.categoria)}</span></td>
             <td>${e.descripcion ? escapeHTML(e.descripcion) : '<span class="text-muted">—</span>'}</td>
-            <td class="text-end monto">${formatAmount(e.monto)}</td>
+            <td class="text-end ${montoClass}">${isIncome ? '+' : '-'}${formatAmount(e.monto)}</td>
             <td class="text-end">
+                <button class="btn btn-sm btn-outline-primary me-1" data-id="${escapeHTML(e.id)}" data-action="edit">
+                    ✏️
+                </button>
                 <button class="btn btn-sm btn-outline-danger" data-id="${escapeHTML(e.id)}" data-action="delete">
-                    Borrar
+                    🗑️
                 </button>
             </td>
-        </tr>
-    `).join('');
+        </tr>`;
+    }).join('');
 }
+
+// --- Render: Resumen ----------------------------------------------
 
 function renderSummary() {
     const filtered = applyFilters();
-    const total = filtered.reduce((acc, e) => acc + e.monto, 0);
-    const count = filtered.length;
-    const average = count ? total / count : 0;
+    const totalIncome = filtered.filter(e => e.tipo === 'income').reduce((acc, e) => acc + e.monto, 0);
+    const totalExpenses = filtered.filter(e => e.tipo !== 'income').reduce((acc, e) => acc + e.monto, 0);
+    const balance = totalIncome - totalExpenses;
 
-    document.getElementById('totalMonth').textContent = formatAmount(total);
-    document.getElementById('expenseCount').textContent = count;
-    document.getElementById('expenseAverage').textContent = formatAmount(average);
-    document.getElementById('totalHeader').textContent = 'Total: ' + formatAmount(total);
+    document.getElementById('totalIncome').textContent = formatAmount(totalIncome);
+    document.getElementById('totalExpenses').textContent = formatAmount(totalExpenses);
+
+    const balanceEl = document.getElementById('totalBalance');
+    balanceEl.textContent = formatAmount(Math.abs(balance));
+    balanceEl.parentElement.className = 'card text-bg-' + (balance >= 0 ? 'success' : 'danger') + ' shadow-sm';
+
+    document.getElementById('totalHeader').textContent =
+        'Balance: ' + (balance >= 0 ? '' : '-') + formatAmount(Math.abs(balance));
 }
+
+// --- Render: Gráficos ---------------------------------------------
+
+let chartExpenses = null;
+let chartIncome = null;
+
+function renderCharts() {
+    const chartEmpty = document.getElementById('chartEmpty');
+    const hasExpenses = entries.some(e => e.tipo !== 'income');
+    const hasIncome = entries.some(e => e.tipo === 'income');
+
+    if (entries.length === 0) {
+        chartEmpty.classList.remove('d-none');
+        document.getElementById('chartExpenses').classList.add('d-none');
+        document.getElementById('chartIncome').classList.add('d-none');
+        return;
+    }
+
+    chartEmpty.classList.add('d-none');
+    document.getElementById('chartExpenses').classList.remove('d-none');
+    document.getElementById('chartIncome').classList.remove('d-none');
+
+    // Destruir charts anteriores
+    if (chartExpenses) { chartExpenses.destroy(); chartExpenses = null; }
+    if (chartIncome) { chartIncome.destroy(); chartIncome = null; }
+
+    const gridColor = getComputedStyle(document.documentElement).getPropertyValue('--bs-border-color').trim() || '#dee2e6';
+
+    function buildPieData(entries, tipo) {
+        const filtered = entries.filter(e => e.tipo === tipo);
+        const map = {};
+        filtered.forEach(e => { map[e.categoria] = (map[e.categoria] || 0) + e.monto; });
+        const labels = Object.keys(map);
+        const data = Object.values(map);
+        const colors = [
+            '#dc3545', '#fd7e14', '#ffc107', '#198754', '#0d6efd', '#6f42c1',
+            '#e83e8c', '#20c997', '#17a2b8', '#6610f2'
+        ];
+        return {
+            labels,
+            datasets: [{ data, backgroundColor: colors.slice(0, labels.length), borderWidth: 1, borderColor: gridColor }]
+        };
+    }
+
+    const ctxExpenses = document.getElementById('chartExpenses').getContext('2d');
+    const ctxIncome = document.getElementById('chartIncome').getContext('2d');
+
+    if (hasExpenses) {
+        chartExpenses = new Chart(ctxExpenses, {
+            type: 'doughnut',
+            data: buildPieData(entries, 'expense'),
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: { position: 'bottom', labels: { color: getComputedStyle(document.documentElement).getPropertyValue('--bs-body-color').trim() || '#212529' } }
+                }
+            }
+        });
+    }
+
+    if (hasIncome) {
+        chartIncome = new Chart(ctxIncome, {
+            type: 'doughnut',
+            data: buildPieData(entries, 'income'),
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: { position: 'bottom', labels: { color: getComputedStyle(document.documentElement).getPropertyValue('--bs-body-color').trim() || '#212529' } }
+                }
+            }
+        });
+    }
+}
+
+// --- Modo oscuro --------------------------------------------------
+
+function loadDarkMode() {
+    const saved = localStorage.getItem(DARK_MODE_KEY);
+    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    return saved !== null ? saved === 'dark' : prefersDark;
+}
+
+function applyDarkMode(dark) {
+    document.documentElement.setAttribute('data-bs-theme', dark ? 'dark' : 'light');
+    document.getElementById('btnDarkMode').textContent = dark ? '☀️' : '🌙';
+    localStorage.setItem(DARK_MODE_KEY, dark ? 'dark' : 'light');
+}
+
+function toggleDarkMode() {
+    const current = document.documentElement.getAttribute('data-bs-theme');
+    const dark = current !== 'dark';
+    applyDarkMode(dark);
+    // Re-render charts con nuevos colores
+    renderCharts();
+}
+
+// --- Render principal ---------------------------------------------
 
 function render() {
     renderTable();
     renderSummary();
+    renderCharts();
 }
 
 // --- Exportar a CSV ----------------------------------------------
 
 function exportCSV() {
-    if (expenses.length === 0) {
-        alert('No hay gastos para exportar.');
+    if (entries.length === 0) {
+        alert('No hay movimientos para exportar.');
         return;
     }
 
-    // Cabecera
-    const lines = ['Fecha,Categoria,Descripcion,Monto'];
+    const lines = ['Fecha,Tipo,Categoria,Descripcion,Monto'];
 
-    // Cuerpo: ordenamos por fecha para que el Excel quede prolijo
-    const sorted = [...expenses].sort((a, b) => a.fecha.localeCompare(b.fecha));
+    const sorted = [...entries].sort((a, b) => a.fecha.localeCompare(b.fecha));
     sorted.forEach(e => {
-        // Escapamos comas y comillas en la descripción
         const desc = `"${(e.descripcion || '').replace(/"/g, '""')}"`;
-        lines.push(`${e.fecha},${e.categoria},${desc},${e.monto.toFixed(2)}`);
+        const sign = e.tipo === 'income' ? '' : '-';
+        lines.push(`${e.fecha},${e.tipo},${e.categoria},${desc},${sign}${e.monto.toFixed(2)}`);
     });
 
-    // Forzamos BOM al inicio para que Excel reconozca acentos
     const csv = '\ufeff' + lines.join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
 
     const a = document.createElement('a');
     a.href = url;
-    a.download = `gastos-${todayISO()}.csv`;
+    a.download = `finanzas-${todayISO()}.csv`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -214,18 +376,22 @@ function exportCSV() {
 function init() {
     loadFromStorage();
 
-    // Fecha de hoy por defecto en el input
+    // Fecha de hoy por defecto
     document.getElementById('date').value = todayISO();
 
     // Cargar categorías en los <select>
     renderCategories();
 
+    // Modo oscuro inicial
+    applyDarkMode(loadDarkMode());
+
     // Render inicial
     render();
 
-    // Submit del formulario
+    // Submit del formulario (alta o edición)
     document.getElementById('expenseForm').addEventListener('submit', (e) => {
         e.preventDefault();
+        const tipo = document.querySelector('input[name="tipo"]:checked').value;
         const amount = document.getElementById('amount').value;
         const category = document.getElementById('category').value;
         const description = document.getElementById('description').value;
@@ -236,12 +402,26 @@ function init() {
             return;
         }
 
-        addExpense({ amount, category, description, date });
+        if (editingId) {
+            updateEntry({ id: editingId, tipo, amount, category, description, date });
+            cancelEdit();
+        } else {
+            addEntry({ tipo, amount, category, description, date });
+        }
+
         e.target.reset();
         document.getElementById('date').value = todayISO();
+        document.getElementById('tipoExpense').checked = true;
     });
 
+    // Cancelar edición
+    document.getElementById('btnCancelEdit').addEventListener('click', cancelEdit);
+
     // Filtros
+    document.getElementById('filterType').addEventListener('change', (e) => {
+        filterType = e.target.value;
+        render();
+    });
     document.getElementById('filterCategory').addEventListener('change', (e) => {
         filterCategory = e.target.value;
         render();
@@ -251,18 +431,31 @@ function init() {
         render();
     });
     document.getElementById('btnClearFilters').addEventListener('click', () => {
+        filterType = '';
         filterCategory = '';
         filterMonth = '';
+        document.getElementById('filterType').value = '';
         document.getElementById('filterCategory').value = '';
         document.getElementById('filterMonth').value = '';
         render();
     });
 
-    // Borrar (delegación de eventos en la tabla)
+    // Acciones en la tabla (editar, borrar)
     document.getElementById('expensesTable').addEventListener('click', (e) => {
-        const btn = e.target.closest('button[data-action="delete"]');
-        if (btn) deleteExpense(btn.dataset.id);
+        const editBtn = e.target.closest('button[data-action="edit"]');
+        const deleteBtn = e.target.closest('button[data-action="delete"]');
+
+        if (editBtn) {
+            const entry = entries.find(entry => entry.id === editBtn.dataset.id);
+            if (entry) enterEditMode(entry);
+        }
+        if (deleteBtn) {
+            deleteEntry(deleteBtn.dataset.id);
+        }
     });
+
+    // Modo oscuro
+    document.getElementById('btnDarkMode').addEventListener('click', toggleDarkMode);
 
     // Exportar CSV
     document.getElementById('btnExport').addEventListener('click', exportCSV);

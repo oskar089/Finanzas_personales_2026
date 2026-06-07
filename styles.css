@@ -9,7 +9,7 @@ body {
     border: none;
 }
 
-#tablaGastos td {
+#expensesTable td {
     vertical-align: middle;
 }
 
@@ -18,8 +18,22 @@ body {
     font-weight: 600;
 }
 
-/* Que el total del header se vea prolijo y destacado */
 #totalHeader {
     font-weight: 600;
     font-size: 1.1rem;
+}
+
+/* Los gráficos ocupan todo el ancho disponible */
+#chartExpenses,
+#chartIncome {
+    max-height: 280px;
+}
+
+/* Transición suave al cambiar modo oscuro/claro */
+html {
+    transition: background-color 0.2s ease;
+}
+
+html[data-bs-theme="dark"] .card {
+    border-color: var(--bs-border-color);
 }
