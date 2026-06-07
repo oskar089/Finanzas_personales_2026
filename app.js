@@ -2,7 +2,7 @@
 // FINANZAS PERSONALES 2026 - Lógica de la app
 // =====================================================================
 // Decisiones de diseño:
-// - Una sola fuente de verdad: el array `gastos` en memoria.
+// - Una sola fuente de verdad: el array `expenses` en memoria.
 // - localStorage se sincroniza en cada cambio (alta o baja).
 // - La UI se re-renderiza completa desde el array, no por parche.
 // - Categorías centralizadas en una constante para no hardcodear.
@@ -12,7 +12,7 @@
 
 const STORAGE_KEY = 'finanzas:gastos:v1';
 
-const CATEGORIAS = [
+const CATEGORIES = [
     'Comida',
     'Transporte',
     'Hogar',
@@ -23,29 +23,29 @@ const CATEGORIAS = [
 
 // --- Estado -------------------------------------------------------
 
-let gastos = [];          // fuente de verdad en memoria
-let filtroCategoria = ''; // '' = todas
-let filtroMes = '';       // '' = todos, formato YYYY-MM
+let expenses = [];          // fuente de verdad en memoria
+let filterCategory = '';    // '' = todas
+let filterMonth = '';       // '' = todos, formato YYYY-MM
 
 // --- Persistencia -------------------------------------------------
 
-function cargarDeStorage() {
+function loadFromStorage() {
     try {
         const raw = localStorage.getItem(STORAGE_KEY);
-        gastos = raw ? JSON.parse(raw) : [];
+        expenses = raw ? JSON.parse(raw) : [];
     } catch (err) {
         console.error('No se pudo leer localStorage, arrancamos vacíos.', err);
-        gastos = [];
+        expenses = [];
     }
 }
 
-function guardarEnStorage() {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(gastos));
+function saveToStorage() {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(expenses));
 }
 
 // --- Helpers ------------------------------------------------------
 
-function escaparHTML(str) {
+function escapeHTML(str) {
     // Escapa caracteres que rompen innerHTML cuando vienen de input del usuario.
     // Importante si en el futuro se sincroniza con servicios externos o se importa CSV.
     return String(str ?? '')
@@ -56,12 +56,16 @@ function escaparHTML(str) {
         .replace(/'/g, '&#39;');
 }
 
-function formatearMonto(n) {
+function formatAmount(n) {
     // Formato argentino: separador de miles con punto, decimales con coma.
-    return '$' + n.toFixed(2).replace('.', ',').replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+    // toLocaleString maneja locales y casos borde mejor que regex encadenadas.
+    return '$' + Number(n).toLocaleString('es-AR', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+    });
 }
 
-function hoyISO() {
+function todayISO() {
     // Devuelve la fecha de hoy en formato YYYY-MM-DD para el input date.
     const d = new Date();
     const yyyy = d.getFullYear();
@@ -70,84 +74,84 @@ function hoyISO() {
     return `${yyyy}-${mm}-${dd}`;
 }
 
-function generarId() {
+function generateId() {
     // Suficiente para una app personal: timestamp + random.
     return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 }
 
 // --- Altas, bajas, modificaciones ---------------------------------
 
-function agregarGasto({ monto, categoria, descripcion, fecha }) {
-    const nuevoGasto = {
-        id: generarId(),
-        monto: Number(monto),
-        categoria,
-        descripcion: descripcion.trim(),
-        fecha
+function addExpense({ amount, category, description, date }) {
+    const newExpense = {
+        id: generateId(),
+        monto: Number(amount),
+        categoria: category,
+        descripcion: description.trim(),
+        fecha: date
     };
-    gastos = [...gastos, nuevoGasto];
-    guardarEnStorage();
+    expenses = [...expenses, newExpense];
+    saveToStorage();
     render();
 }
 
-function eliminarGasto(id) {
+function deleteExpense(id) {
     if (!confirm('¿Borrar este gasto?')) return;
-    gastos = gastos.filter(g => g.id !== id);
-    guardarEnStorage();
+    expenses = expenses.filter(e => e.id !== id);
+    saveToStorage();
     render();
 }
 
 // --- Filtros ------------------------------------------------------
 
-function aplicarFiltros() {
-    return gastos.filter(g => {
-        const pasaCategoria = !filtroCategoria || g.categoria === filtroCategoria;
-        const pasaMes = !filtroMes || g.fecha.startsWith(filtroMes);
-        return pasaCategoria && pasaMes;
+function applyFilters() {
+    return expenses.filter(e => {
+        const passesCategory = !filterCategory || e.categoria === filterCategory;
+        const passesMonth = !filterMonth || e.fecha.startsWith(filterMonth);
+        return passesCategory && passesMonth;
     });
 }
 
 // --- Render -------------------------------------------------------
 
-function renderCategorias() {
-    const select = document.getElementById('categoria');
-    const filtro = document.getElementById('filtroCategoria');
+function renderCategories() {
+    const select = document.getElementById('category');
+    const filter = document.getElementById('filterCategory');
 
     // Carga el <select> del formulario
-    select.innerHTML = CATEGORIAS
+    select.innerHTML = CATEGORIES
         .map(c => `<option value="${c}">${c}</option>`)
         .join('');
 
     // Carga el <select> del filtro, agregando "Todas" como primera opción
-    filtro.innerHTML =
+    filter.innerHTML =
         '<option value="">Todas</option>' +
-        CATEGORIAS.map(c => `<option value="${c}">${c}</option>`).join('');
+        CATEGORIES.map(c => `<option value="${c}">${c}</option>`).join('');
 }
 
-function renderTabla() {
-    const tbody = document.getElementById('tablaGastos');
-    const mensajeVacio = document.getElementById('mensajeVacio');
-    const filtrados = aplicarFiltros();
+function renderTable() {
+    const tbody = document.getElementById('expensesTable');
+    const emptyMessage = document.getElementById('emptyMessage');
+    const filtered = applyFilters();
 
-    if (filtrados.length === 0) {
+    if (filtered.length === 0) {
         tbody.innerHTML = '';
-        mensajeVacio.classList.remove('d-none');
+        emptyMessage.classList.remove('d-none');
         return;
     }
 
-    mensajeVacio.classList.add('d-none');
+    emptyMessage.classList.add('d-none');
 
     // Ordenamos por fecha descendente (más reciente arriba)
-    const ordenados = [...filtrados].sort((a, b) => b.fecha.localeCompare(a.fecha));
+    const sorted = [...filtered].sort((a, b) => b.fecha.localeCompare(a.fecha));
 
-    tbody.innerHTML = ordenados.map(g => `
+    tbody.innerHTML = sorted.map(e => `
         <tr>
-            <td>${escaparHTML(g.fecha)}</td>
-            <td><span class="badge bg-secondary">${escaparHTML(g.categoria)}</span></td>
-            <td>${g.descripcion ? escaparHTML(g.descripcion) : '<span class="text-muted">—</span>'}</td>
-            <td class="text-end monto">${formatearMonto(g.monto)}</td>
+            <td>${escapeHTML(e.fecha)}</td>
+            <td><span class="badge bg-secondary">${escapeHTML(e.categoria)}</span></td>
+            <td>${e.descripcion ? escapeHTML(e.descripcion) : '<span class="text-muted">—</span>'}</td>
+            <td class="text-end monto">${formatAmount(e.monto)}</td>
             <td class="text-end">
-                <button class="btn btn-sm btn-outline-danger" data-id="${escaparHTML(g.id)}" data-action="borrar">
+                <button class="btn btn-sm btn-outline-danger" data-id="${escapeHTML(e.id)}" data-action="delete">
                     Borrar
                 </button>
             </td>
@@ -155,50 +159,50 @@ function renderTabla() {
     `).join('');
 }
 
-function renderResumen() {
-    const filtrados = aplicarFiltros();
-    const total = filtrados.reduce((acc, g) => acc + g.monto, 0);
-    const cantidad = filtrados.length;
-    const promedio = cantidad ? total / cantidad : 0;
+function renderSummary() {
+    const filtered = applyFilters();
+    const total = filtered.reduce((acc, e) => acc + e.monto, 0);
+    const count = filtered.length;
+    const average = count ? total / count : 0;
 
-    document.getElementById('totalMes').textContent = formatearMonto(total);
-    document.getElementById('cantidadGastos').textContent = cantidad;
-    document.getElementById('promedioGasto').textContent = formatearMonto(promedio);
-    document.getElementById('totalHeader').textContent = 'Total: ' + formatearMonto(total);
+    document.getElementById('totalMonth').textContent = formatAmount(total);
+    document.getElementById('expenseCount').textContent = count;
+    document.getElementById('expenseAverage').textContent = formatAmount(average);
+    document.getElementById('totalHeader').textContent = 'Total: ' + formatAmount(total);
 }
 
 function render() {
-    renderTabla();
-    renderResumen();
+    renderTable();
+    renderSummary();
 }
 
 // --- Exportar a CSV ----------------------------------------------
 
-function exportarCSV() {
-    if (gastos.length === 0) {
+function exportCSV() {
+    if (expenses.length === 0) {
         alert('No hay gastos para exportar.');
         return;
     }
 
     // Cabecera
-    const lineas = ['Fecha,Categoria,Descripcion,Monto'];
+    const lines = ['Fecha,Categoria,Descripcion,Monto'];
 
     // Cuerpo: ordenamos por fecha para que el Excel quede prolijo
-    const ordenados = [...gastos].sort((a, b) => a.fecha.localeCompare(b.fecha));
-    ordenados.forEach(g => {
+    const sorted = [...expenses].sort((a, b) => a.fecha.localeCompare(b.fecha));
+    sorted.forEach(e => {
         // Escapamos comas y comillas en la descripción
-        const desc = `"${(g.descripcion || '').replace(/"/g, '""')}"`;
-        lineas.push(`${g.fecha},${g.categoria},${desc},${g.monto.toFixed(2)}`);
+        const desc = `"${(e.descripcion || '').replace(/"/g, '""')}"`;
+        lines.push(`${e.fecha},${e.categoria},${desc},${e.monto.toFixed(2)}`);
     });
 
     // Forzamos BOM al inicio para que Excel reconozca acentos
-    const csv = '\ufeff' + lineas.join('\n');
+    const csv = '\ufeff' + lines.join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
 
     const a = document.createElement('a');
     a.href = url;
-    a.download = `gastos-${hoyISO()}.csv`;
+    a.download = `gastos-${todayISO()}.csv`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -208,60 +212,60 @@ function exportarCSV() {
 // --- Eventos ------------------------------------------------------
 
 function init() {
-    cargarDeStorage();
+    loadFromStorage();
 
     // Fecha de hoy por defecto en el input
-    document.getElementById('fecha').value = hoyISO();
+    document.getElementById('date').value = todayISO();
 
     // Cargar categorías en los <select>
-    renderCategorias();
+    renderCategories();
 
     // Render inicial
     render();
 
     // Submit del formulario
-    document.getElementById('formGasto').addEventListener('submit', (e) => {
+    document.getElementById('expenseForm').addEventListener('submit', (e) => {
         e.preventDefault();
-        const monto = document.getElementById('monto').value;
-        const categoria = document.getElementById('categoria').value;
-        const descripcion = document.getElementById('descripcion').value;
-        const fecha = document.getElementById('fecha').value;
+        const amount = document.getElementById('amount').value;
+        const category = document.getElementById('category').value;
+        const description = document.getElementById('description').value;
+        const date = document.getElementById('date').value;
 
-        if (!monto || Number(monto) <= 0) {
+        if (!amount || Number(amount) <= 0) {
             alert('El monto tiene que ser mayor a 0.');
             return;
         }
 
-        agregarGasto({ monto, categoria, descripcion, fecha });
+        addExpense({ amount, category, description, date });
         e.target.reset();
-        document.getElementById('fecha').value = hoyISO();
+        document.getElementById('date').value = todayISO();
     });
 
     // Filtros
-    document.getElementById('filtroCategoria').addEventListener('change', (e) => {
-        filtroCategoria = e.target.value;
+    document.getElementById('filterCategory').addEventListener('change', (e) => {
+        filterCategory = e.target.value;
         render();
     });
-    document.getElementById('filtroMes').addEventListener('change', (e) => {
-        filtroMes = e.target.value;
+    document.getElementById('filterMonth').addEventListener('change', (e) => {
+        filterMonth = e.target.value;
         render();
     });
-    document.getElementById('btnLimpiarFiltros').addEventListener('click', () => {
-        filtroCategoria = '';
-        filtroMes = '';
-        document.getElementById('filtroCategoria').value = '';
-        document.getElementById('filtroMes').value = '';
+    document.getElementById('btnClearFilters').addEventListener('click', () => {
+        filterCategory = '';
+        filterMonth = '';
+        document.getElementById('filterCategory').value = '';
+        document.getElementById('filterMonth').value = '';
         render();
     });
 
     // Borrar (delegación de eventos en la tabla)
-    document.getElementById('tablaGastos').addEventListener('click', (e) => {
-        const btn = e.target.closest('button[data-action="borrar"]');
-        if (btn) eliminarGasto(btn.dataset.id);
+    document.getElementById('expensesTable').addEventListener('click', (e) => {
+        const btn = e.target.closest('button[data-action="delete"]');
+        if (btn) deleteExpense(btn.dataset.id);
     });
 
     // Exportar CSV
-    document.getElementById('btnExportar').addEventListener('click', exportarCSV);
+    document.getElementById('btnExport').addEventListener('click', exportCSV);
 }
 
 // Arranca cuando el DOM está listo

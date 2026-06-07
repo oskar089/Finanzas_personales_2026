@@ -23,28 +23,28 @@
         <section class="card shadow-sm mb-4">
             <div class="card-body">
                 <h2 class="h5 card-title mb-3">Cargar gasto</h2>
-                <form id="formGasto" class="row g-3">
+                <form id="expenseForm" class="row g-3">
                     <div class="col-md-3">
-                        <label for="monto" class="form-label">Monto</label>
-                        <input type="number" class="form-control" id="monto" step="0.01" min="0" required>
+                        <label for="amount" class="form-label">Monto</label>
+                        <input type="number" class="form-control" id="amount" step="0.01" min="0" required>
                     </div>
                     <div class="col-md-3">
-                        <label for="categoria" class="form-label">Categoría</label>
-                        <select id="categoria" class="form-select" required>
-                            <!-- Se llena desde JS con la constante CATEGORIAS -->
+                        <label for="category" class="form-label">Categoría</label>
+                        <select id="category" class="form-select" required>
+                            <!-- Se llena desde JS con la constante CATEGORIES -->
                         </select>
                     </div>
                     <div class="col-md-4">
-                        <label for="descripcion" class="form-label">Descripción</label>
-                        <input type="text" class="form-control" id="descripcion" maxlength="100" placeholder="Ej: café con medialunas">
+                        <label for="description" class="form-label">Descripción</label>
+                        <input type="text" class="form-control" id="description" maxlength="100" placeholder="Ej: café con medialunas">
                     </div>
                     <div class="col-md-2">
-                        <label for="fecha" class="form-label">Fecha</label>
-                        <input type="date" class="form-control" id="fecha" required>
+                        <label for="date" class="form-label">Fecha</label>
+                        <input type="date" class="form-control" id="date" required>
                     </div>
                     <div class="col-12">
                         <button type="submit" class="btn btn-primary">Guardar gasto</button>
-                        <button type="button" id="btnExportar" class="btn btn-outline-secondary ms-2">Exportar CSV</button>
+                        <button type="button" id="btnExport" class="btn btn-outline-secondary ms-2">Exportar CSV</button>
                     </div>
                 </form>
             </div>
@@ -55,17 +55,17 @@
             <div class="card-body">
                 <div class="row g-3 align-items-end">
                     <div class="col-md-4">
-                        <label for="filtroCategoria" class="form-label">Filtrar por categoría</label>
-                        <select id="filtroCategoria" class="form-select">
+                        <label for="filterCategory" class="form-label">Filtrar por categoría</label>
+                        <select id="filterCategory" class="form-select">
                             <option value="">Todas</option>
                         </select>
                     </div>
                     <div class="col-md-4">
-                        <label for="filtroMes" class="form-label">Filtrar por mes</label>
-                        <input type="month" id="filtroMes" class="form-control">
+                        <label for="filterMonth" class="form-label">Filtrar por mes</label>
+                        <input type="month" id="filterMonth" class="form-control">
                     </div>
                     <div class="col-md-4">
-                        <button type="button" id="btnLimpiarFiltros" class="btn btn-outline-secondary w-100">Limpiar filtros</button>
+                        <button type="button" id="btnClearFilters" class="btn btn-outline-secondary w-100">Limpiar filtros</button>
                     </div>
                 </div>
             </div>
@@ -77,7 +77,7 @@
                 <div class="card text-bg-primary shadow-sm">
                     <div class="card-body">
                         <h3 class="h6">Total del mes</h3>
-                        <p class="display-6 mb-0" id="totalMes">$0</p>
+                        <p class="display-6 mb-0" id="totalMonth">$0</p>
                     </div>
                 </div>
             </div>
@@ -85,7 +85,7 @@
                 <div class="card text-bg-success shadow-sm">
                     <div class="card-body">
                         <h3 class="h6">Cantidad de gastos</h3>
-                        <p class="display-6 mb-0" id="cantidadGastos">0</p>
+                        <p class="display-6 mb-0" id="expenseCount">0</p>
                     </div>
                 </div>
             </div>
@@ -93,7 +93,7 @@
                 <div class="card text-bg-info shadow-sm">
                     <div class="card-body">
                         <h3 class="h6">Promedio por gasto</h3>
-                        <p class="display-6 mb-0" id="promedioGasto">$0</p>
+                        <p class="display-6 mb-0" id="expenseAverage">$0</p>
                     </div>
                 </div>
             </div>
@@ -114,12 +114,12 @@
                                 <th class="text-end">Acción</th>
                             </tr>
                         </thead>
-                        <tbody id="tablaGastos">
+                        <tbody id="expensesTable">
                             <!-- Se llena desde JS -->
                         </tbody>
                     </table>
                 </div>
-                <p id="mensajeVacio" class="text-muted text-center my-4 d-none">
+                <p id="emptyMessage" class="text-muted text-center my-4 d-none">
                     No hay gastos cargados todavía. ¡Empezá por el formulario de arriba! 👆
                 </p>
             </div>
