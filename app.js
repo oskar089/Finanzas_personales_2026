@@ -6,34 +6,13 @@
 // - localStorage se sincroniza en cada cambio (alta, baja o modificación).
 // - La UI se re-renderiza completa desde el array, no por parche.
 // - Datos legacy sin `tipo` se tratan como 'expense' (backward compat).
+// - Las funciones puras viven en src/finance.js y se exponen via window.*.
 // =====================================================================
 
 // --- Constantes ---------------------------------------------------
 
 const STORAGE_KEY = 'finanzas:gastos:v1';
 const DARK_MODE_KEY = 'finanzas:dark-mode';
-
-const EXPENSE_CATEGORIES = [
-    'Comida',
-    'Transporte',
-    'Hogar',
-    'Ocio',
-    'Salud',
-    'Otro'
-];
-
-const INCOME_CATEGORIES = [
-    'Sueldo',
-    'Freelance',
-    'Inversiones',
-    'Varios'
-];
-
-function getAllCategories() {
-    // Unifica categorías de gasto e ingreso, sin duplicar 'Otro' y 'Varios'
-    const set = new Set([...EXPENSE_CATEGORIES, ...INCOME_CATEGORIES]);
-    return [...set];
-}
 
 // --- Estado -------------------------------------------------------
 
@@ -59,40 +38,6 @@ function loadFromStorage() {
 
 function saveToStorage() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
-}
-
-// --- Helpers ------------------------------------------------------
-
-function escapeHTML(str) {
-    // Escapa caracteres que rompen innerHTML cuando vienen de input del usuario.
-    return String(str ?? '')
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
-}
-
-function formatAmount(n) {
-    // Formato argentino: separador de miles con punto, decimales con coma.
-    return '$' + Number(n).toLocaleString('es-AR', {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2
-    });
-}
-
-function todayISO() {
-    // Devuelve la fecha de hoy en formato YYYY-MM-DD para el input date.
-    const d = new Date();
-    const yyyy = d.getFullYear();
-    const mm = String(d.getMonth() + 1).padStart(2, '0');
-    const dd = String(d.getDate()).padStart(2, '0');
-    return `${yyyy}-${mm}-${dd}`;
-}
-
-function generateId() {
-    // Suficiente para una app personal: timestamp + random.
-    return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 }
 
 // --- Auto-categorización con IA local (Ollama) -------------------
@@ -195,12 +140,11 @@ function deleteEntry(id) {
 
 // --- Filtros ------------------------------------------------------
 
-function applyFilters() {
-    return entries.filter(e => {
-        const passesType = !filterType || e.tipo === filterType;
-        const passesCategory = !filterCategory || e.categoria === filterCategory;
-        const passesMonth = !filterMonth || e.fecha.startsWith(filterMonth);
-        return passesType && passesCategory && passesMonth;
+function getFilteredEntries() {
+    return filterEntries(entries, {
+        type: filterType,
+        category: filterCategory,
+        month: filterMonth
     });
 }
 
@@ -246,7 +190,7 @@ function cancelEdit() {
 function renderTable() {
     const tbody = document.getElementById('expensesTable');
     const emptyMessage = document.getElementById('emptyMessage');
-    const filtered = applyFilters();
+    const filtered = getFilteredEntries();
 
     if (filtered.length === 0) {
         tbody.innerHTML = '';
@@ -287,10 +231,8 @@ function renderTable() {
 // --- Render: Resumen ----------------------------------------------
 
 function renderSummary() {
-    const filtered = applyFilters();
-    const totalIncome = filtered.filter(e => e.tipo === 'income').reduce((acc, e) => acc + e.monto, 0);
-    const totalExpenses = filtered.filter(e => e.tipo !== 'income').reduce((acc, e) => acc + e.monto, 0);
-    const balance = totalIncome - totalExpenses;
+    const filtered = getFilteredEntries();
+    const { totalIncome, totalExpenses, balance } = calculateBalance(filtered);
 
     document.getElementById('totalIncome').textContent = formatAmount(totalIncome);
     document.getElementById('totalExpenses').textContent = formatAmount(totalExpenses);
@@ -526,8 +468,9 @@ function init() {
         const description = document.getElementById('description').value;
         const date = document.getElementById('date').value;
 
-        if (!amount || Number(amount) <= 0) {
-            alert('El monto tiene que ser mayor a 0.');
+        const errors = validateEntry({ tipo, amount, category, description });
+        if (errors.length > 0) {
+            alert(errors[0]);
             return;
         }
 
