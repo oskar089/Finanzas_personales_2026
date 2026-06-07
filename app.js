@@ -127,10 +127,14 @@ Respondé SOLO con el nombre exacto de la categoría, sin puntos ni explicacione
         if (!res.ok) throw new Error(`Ollama respondió ${res.status}`);
 
         const data = await res.json();
-        const suggestion = data.response.trim();
+        let suggestion = data.response.trim()
+            .replace(/^["'*]+|["'*.]+$/g, '')    // saca comillas/asteriscos al inicio/fin
+            .replace(/[.,;:!?]+$/, '');            // saca puntuación al final
+        console.log('🧠 Gemma 4 respondió:', data.response, '→ Limpiado:', suggestion);
 
-        // Buscar coincidencia exacta o parcial en las categorías
-        const match = getAllCategories().find(
+        // Buscar coincidencia exacta (case insensitive)
+        const allCats = getAllCategories();
+        const match = allCats.find(
             c => c.toLowerCase() === suggestion.toLowerCase()
         );
 
@@ -138,13 +142,13 @@ Respondé SOLO con el nombre exacto de la categoría, sin puntos ni explicacione
             document.getElementById('category').value = match;
         } else {
             // Coincidencia parcial
-            const partial = getAllCategories().find(
+            const partial = allCats.find(
                 c => suggestion.toLowerCase().includes(c.toLowerCase()) || c.toLowerCase().includes(suggestion.toLowerCase())
             );
             if (partial) {
                 document.getElementById('category').value = partial;
             } else {
-                alert(`Gemma 4 sugirió "${suggestion}" pero no coincide con ninguna categoría. Seleccioná manual.`);
+                alert(`Gemma 4 sugirió "${suggestion}" pero no coincide con ninguna categoría.\nCategorías: ${allCats.join(', ')}`);
             }
         }
     } catch (err) {
