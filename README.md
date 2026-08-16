@@ -1,41 +1,45 @@
-# 💰 Finanzas Personales 2026
+# 💰 Personal Finance 2026
 
-App web simple para llevar el control de finanzas personales (gastos e ingresos).
+[![Live Demo](https://img.shields.io/badge/Live%20Demo-GitHub%20Pages-222222?style=for-the-badge&logo=github&logoColor=white)](https://oskar089.github.io/Finanzas_personales_2026/)
 
-## Características
+A simple web app to track personal finances (expenses and income).
 
-- Cargar gastos e ingresos con monto, categoría, descripción y fecha.
-- Editar y borrar movimientos.
-- Ver lista de movimientos ordenados por fecha (más reciente primero).
-- Filtrar por tipo, categoría y/o mes.
-- Resumen: ingresos, gastos y balance.
-- Gráficos de distribución por categoría (Chart.js).
-- Auto-categorización con IA local (Ollama / Gemma 4).
-- Modo oscuro.
-- Exportar a CSV (compatible con Excel y Google Sheets, con protección contra fórmulas).
-- Exportar e importar JSON (backup y restauración manual).
-- Datos guardados en el navegador (`localStorage`). No salen de tu compu.
+> **Note on the live demo:** AI auto-categorization (Ollama / Gemma 4) requires Ollama running locally on your machine, so this feature is not available in the deployed version. The rest of the app works normally.
 
-## Stack
+## Features
+
+- Add expenses and income with amount, category, description and date.
+- Edit and delete entries.
+- View the transaction list ordered by date (most recent first).
+- Filter by type, category and/or month.
+- Summary: income, expenses and balance.
+- Category distribution charts (Chart.js).
+- Local AI auto-categorization (Ollama / Gemma 4).
+- Dark mode.
+- Export to CSV (Excel and Google Sheets compatible, with formula injection protection).
+- Export and import JSON (backup and manual restore).
+- Data stored in the browser (`localStorage`). It never leaves your machine.
+
+## Tech Stack
 
 - HTML5
-- CSS3 + Bootstrap 5.3 (por CDN con SRI)
-- JavaScript vanilla (sin frameworks, sin build)
-- Chart.js 4.x (por CDN con SRI)
-- Vitest + jsdom para tests
+- CSS3 + Bootstrap 5.3 (CDN with SRI)
+- Vanilla JavaScript (no frameworks, no build step)
+- Chart.js 4.x (CDN with SRI)
+- Vitest + jsdom for tests
 
-## Cómo usar
+## How to Use
 
-1. Abrí `index.html` en tu navegador (doble click y listo).
-2. Empezá a cargar movimientos.
-3. Filtrá por tipo, categoría o mes cuando quieras.
-4. Exportá a CSV o JSON cuando quieras respaldar.
+1. Open `index.html` in your browser (double click and you're done).
+2. Start adding entries.
+3. Filter by type, category or month whenever you want.
+4. Export to CSV or JSON when you want a backup.
 
-### Auto-categorización con IA (opcional)
+### AI auto-categorization (optional)
 
-- Requiere [Ollama](https://ollama.com) corriendo en `localhost:11434` con el modelo `gemma4` (`ollama pull gemma4`).
-- Por CORS, la auto-categorización funciona mejor sirviendo la app por HTTP local
-  (por ejemplo `npx serve .` o `python -m http.server`) en vez de abrir `index.html` directo.
+- Requires [Ollama](https://ollama.com) running on `localhost:11434` with the `gemma4` model (`ollama pull gemma4`).
+- Due to CORS, auto-categorization works best when serving the app over local HTTP
+  (for example `npx serve .` or `python -m http.server`) instead of opening `index.html` directly.
 
 ## Tests
 
@@ -43,19 +47,19 @@ App web simple para llevar el control de finanzas personales (gastos e ingresos)
 npx vitest run
 ```
 
-Las funciones puras viven en `src/finance.js` y son la superficie de prueba (`src/finance.test.js`).
+Pure functions live in `src/finance.js` and are the test surface (`src/finance.test.js`).
 
-## Decisiones de diseño
+## Design Decisions
 
-- **Una sola fuente de verdad**: el array `entries` en memoria. `localStorage` se sincroniza en cada cambio. La UI se re-renderiza desde el array, no por parches.
-- **Moneda**: euro (€) con formato `es-ES`.
-- **Categorías centralizadas** en `src/finance.js` (`EXPENSE_CATEGORIES` e `INCOME_CATEGORIES`). Para agregar una nueva, modificás esas listas y se actualizan los `<select>` automáticamente.
-- **Versión en la clave de storage** (`finanzas:gastos:v1`). Si en el futuro cambia la estructura, se puede migrar leyendo `v1` y escribiendo `v2` sin romper datos viejos.
-- **CSV con BOM** al inicio (`\ufeff`) para que Excel reconozca acentos y la ñ sin pedirte encoding, y con campos neutralizados contra inyección de fórmulas.
-- **CDN con SRI** (`integrity` + `crossorigin`) para que el navegador verifique que Bootstrap y Chart.js no fueron alterados.
+- **Single source of truth**: the `entries` array in memory. `localStorage` syncs on every change. The UI re-renders from the array, not from patches.
+- **Currency**: euro (€) with `es-ES` formatting.
+- **Centralized categories** in `src/finance.js` (`EXPENSE_CATEGORIES` and `INCOME_CATEGORIES`). To add a new one, edit those lists and the `<select>` elements update automatically.
+- **Versioned storage key** (`finanzas:gastos:v1`). If the structure changes in the future, it can be migrated by reading `v1` and writing `v2` without breaking old data.
+- **CSV with BOM** at the start (`\ufeff`) so Excel recognizes accents and ñ without asking for encoding, and with neutralized fields against formula injection.
+- **CDN with SRI** (`integrity` + `crossorigin`) so the browser verifies Bootstrap and Chart.js were not altered.
 
-## Próximas mejoras posibles
+## Possible Future Improvements
 
-- Categorías personalizadas por el usuario.
-- Cifrado de datos en localStorage.
-- Sincronización con la nube (OneDrive / Google Drive vía API).
+- User-defined categories.
+- Data encryption in localStorage.
+- Cloud sync (OneDrive / Google Drive via API).
