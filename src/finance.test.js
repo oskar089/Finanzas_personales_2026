@@ -39,25 +39,25 @@ describe('getAllCategories()', () => {
 // 4.2 formatAmount()
 // -------------------------------------------------------------------
 describe('formatAmount()', () => {
-    it('formatea con signo $, separador de miles y 2 decimales', () => {
+    it('formatea con signo €, separador de miles y 2 decimales', () => {
         const result = finance.formatAmount(1500);
-        expect(result).toMatch(/^\$/);
+        expect(result).toMatch(/^€/);
         expect(result).toContain(',');
     });
 
-    it('formatea 0 como $0,00', () => {
-        expect(finance.formatAmount(0)).toBe('$0,00');
+    it('formatea 0 como €0,00', () => {
+        expect(finance.formatAmount(0)).toBe('€0,00');
     });
 
     it('formatea numeros grandes con separador de miles', () => {
         const result = finance.formatAmount(1234567.89);
-        expect(result).toMatch(/^\$/);
+        expect(result).toMatch(/^€/);
         expect(result).toContain('.');
         expect(result).toContain(',');
     });
 
     it('maneja string numerico', () => {
-        expect(finance.formatAmount('500')).toBe('$500,00');
+        expect(finance.formatAmount('500')).toBe('€500,00');
     });
 });
 

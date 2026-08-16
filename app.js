@@ -75,7 +75,6 @@ Respondé SOLO con el nombre exacto de la categoría, sin puntos ni explicacione
         let suggestion = data.response.trim()
             .replace(/^["'*]+|["'*.]+$/g, '')    // saca comillas/asteriscos al inicio/fin
             .replace(/[.,;:!?]+$/, '');            // saca puntuación al final
-        console.log('🧠 Gemma 4 respondió:', data.response, '→ Limpiado:', suggestion);
 
         // Buscar coincidencia exacta (case insensitive)
         const allCats = getAllCategories();
@@ -152,8 +151,12 @@ function getFilteredEntries() {
 
 function renderCategories() {
     const select = document.getElementById('category');
+    const filterSelect = document.getElementById('filterCategory');
     const cats = getAllCategories();
-    select.innerHTML = cats.map(c => `<option value="${c}">${c}</option>`).join('');
+    const options = cats.map(c => `<option value="${c}">${c}</option>`).join('');
+    select.innerHTML = options;
+    // El filtro de categoría arranca con la opción "Todas"
+    filterSelect.innerHTML = '<option value="">Todas</option>' + options;
 }
 
 function enterEditMode(entry) {
@@ -356,13 +359,22 @@ function exportCSV() {
         return;
     }
 
+    // CSV safe: neutraliza formulas (=, +, -, @) y comilla campos con separadores.
+    function csvSafe(value) {
+        let out = String(value ?? '');
+        if (/^[=+\-@]/.test(out)) out = "'" + out;
+        if (/[",\n\r]/.test(out)) out = '"' + out.replace(/"/g, '""') + '"';
+        return out;
+    }
+
     const lines = ['Fecha,Tipo,Categoria,Descripcion,Monto'];
 
     const sorted = [...entries].sort((a, b) => a.fecha.localeCompare(b.fecha));
     sorted.forEach(e => {
-        const desc = `"${(e.descripcion || '').replace(/"/g, '""')}"`;
         const sign = e.tipo === 'income' ? '' : '-';
-        lines.push(`${e.fecha},${e.tipo},${e.categoria},${desc},${sign}${e.monto.toFixed(2)}`);
+        const monto = `${sign}${Number(e.monto).toFixed(2)}`;
+        lines.push([e.fecha, e.tipo, e.categoria, e.descripcion, monto]
+            .map(csvSafe).join(','));
     });
 
     const csv = '\ufeff' + lines.join('\n');
@@ -417,23 +429,44 @@ function importJSON(file) {
                 return;
             }
 
-            const incoming = data.entries.map(entry => ({
-                ...entry,
-                tipo: entry.tipo || 'expense'
-            }));
+            // Normalizar y validar entrada por entrada; descartar las inválidas.
+            const incoming = [];
+            let skipped = 0;
+            data.entries.forEach(entry => {
+                const normalized = {
+                    ...entry,
+                    tipo: entry.tipo || 'expense',
+                    monto: Number(entry.monto)
+                };
+                const errors = validateEntry({
+                    tipo: normalized.tipo,
+                    amount: normalized.monto,
+                    category: normalized.categoria,
+                    description: normalized.descripcion
+                });
+                const fechaValida = typeof normalized.fecha === 'string' &&
+                    /^\d{4}-\d{2}-\d{2}$/.test(normalized.fecha) &&
+                    !isNaN(Date.parse(normalized.fecha));
+                if (errors.length === 0 && fechaValida && isFinite(normalized.monto)) {
+                    incoming.push(normalized);
+                } else {
+                    skipped++;
+                }
+            });
 
             if (incoming.length === 0) {
-                alert('El archivo no contiene movimientos.');
+                alert('El archivo no contiene movimientos válidos.');
                 return;
             }
 
-            const msg = `¿Reemplazar todos los datos actuales (${entries.length} movimientos) con los del archivo (${incoming.length} movimientos)?`;
+            const skipNote = skipped > 0 ? ` Se descartaron ${skipped} movimiento(s) inválido(s).` : '';
+            const msg = `¿Reemplazar todos los datos actuales (${entries.length} movimientos) con los del archivo (${incoming.length} movimientos)?${skipNote}`;
             if (!confirm(msg)) return;
 
             entries = incoming;
             saveToStorage();
             render();
-            alert(`Importados ${incoming.length} movimientos correctamente.`);
+            alert(`Importados ${incoming.length} movimientos correctamente.${skipNote}`);
         } catch (err) {
             alert('Error al leer el archivo. Asegurate de que sea un JSON válido exportado desde esta app.');
             console.error('Import error:', err);

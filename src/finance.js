@@ -45,7 +45,7 @@ function escapeHTML(str) {
 
 function formatAmount(n) {
     // Formato argentino: separador de miles con punto, decimales con coma.
-    return '$' + Number(n).toLocaleString('es-AR', {
+    return '€' + Number(n).toLocaleString('es-ES', {
         minimumFractionDigits: 2,
         maximumFractionDigits: 2
     });
