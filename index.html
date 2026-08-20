@@ -3,6 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#0d6efd">
+    <link rel="manifest" href="manifest.json">
     <title>Finanzas Personales 2026</title>
     <!-- Bootstrap 5.3 por CDN (SRI: verifica integridad del archivo) -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-T3c6CoIi6uLrA9TneNEoa7RxnatzjcDSCmG1MXxSR1GAsXEV/Dwwykc2MPK8M2HN" crossorigin="anonymous">
@@ -94,6 +96,13 @@
                         <input type="month" id="filterMonth" class="form-control">
                     </div>
                     <div class="col-md-3">
+                        <label for="filterSearch" class="form-label">Buscar</label>
+                        <div class="input-group">
+                            <input type="text" id="filterSearch" class="form-control" placeholder="Descripción, categoría...">
+                            <button type="button" id="btnClearSearch" class="btn btn-outline-secondary" title="Limpiar búsqueda">✕</button>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
                         <button type="button" id="btnClearFilters" class="btn btn-outline-secondary w-100">Limpiar filtros</button>
                     </div>
                 </div>
@@ -125,6 +134,89 @@
                         <p class="display-6 mb-0" id="totalBalance">€0</p>
                     </div>
                 </div>
+            </div>
+        </section>
+
+        <!-- Dashboard -->
+        <section class="row g-3 mb-4" id="dashboard">
+            <div class="col-md-3 col-6">
+                <div class="card shadow-sm">
+                    <div class="card-body">
+                        <h3 class="h6 text-muted">📅 Promedio diario</h3>
+                        <p class="h4 mb-0" id="dashAvgDaily">€0</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3 col-6">
+                <div class="card shadow-sm">
+                    <div class="card-body">
+                        <h3 class="h6 text-muted">🔮 Proyección fin de mes</h3>
+                        <p class="h4 mb-0" id="dashProjection">€0</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3 col-6">
+                <div class="card shadow-sm">
+                    <div class="card-body">
+                        <h3 class="h6 text-muted">📊 vs Mes anterior</h3>
+                        <p class="h4 mb-0" id="dashComparison">—</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3 col-6">
+                <div class="card shadow-sm">
+                    <div class="card-body">
+                        <h3 class="h6 text-muted">⏳ Días restantes</h3>
+                        <p class="h4 mb-0" id="dashDaysLeft">—</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Presupuestos -->
+        <section class="card shadow-sm mb-4">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <h2 class="h5 card-title mb-0">💰 Presupuestos por categoría</h2>
+                    <button type="button" class="btn btn-outline-primary btn-sm" id="btnBudgetConfig" data-bs-toggle="modal" data-bs-target="#budgetModal">
+                        Configurar
+                    </button>
+                </div>
+                <div class="row g-3" id="budgetsContainer">
+                    <!-- Se llena desde JS -->
+                </div>
+                <p id="budgetsEmpty" class="text-muted text-center my-3 d-none">
+                    No hay presupuestos configurados. Hacé clic en "Configurar" para empezar.
+                </p>
+            </div>
+        </section>
+
+        <!-- Gastos Recurrentes -->
+        <section class="card shadow-sm mb-4">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <h2 class="h5 card-title mb-0">🔁 Gastos Recurrentes</h2>
+                    <button type="button" class="btn btn-outline-primary btn-sm" id="btnRecurringConfig" data-bs-toggle="modal" data-bs-target="#recurringModal">
+                        Configurar
+                    </button>
+                </div>
+                <div id="recurringContainer" class="row g-3">
+                    <!-- Se llena desde JS -->
+                </div>
+                <p id="recurringEmpty" class="text-muted text-center my-3 d-none">
+                    No hay recurrentes configurados. Hacé clic en "Configurar" para empezar.
+                </p>
+            </div>
+        </section>
+
+        <!-- Gráfico de tendencia -->
+        <section class="card shadow-sm mb-4">
+            <div class="card-body">
+                <h2 class="h5 card-title mb-3">📈 Tendencia mensual</h2>
+                <canvas id="chartTrend"></canvas>
+                <p id="trendEmpty" class="text-muted text-center my-4 d-none">
+                    No hay datos para mostrar tendencia. Cargá algunos movimientos.
+                </p>
             </div>
         </section>
 
@@ -178,10 +270,67 @@
     </main>
 
     <footer class="container text-center text-muted py-4">
-        <small>Datos guardados en tu navegador (localStorage). Nada sale de acá.</small>
+        <small>Datos guardados en tu navegador (IndexedDB). Nada sale de acá.</small>
     </footer>
 
+    <!-- Modal Gastos Recurrentes -->
+    <div class="modal fade" id="recurringModal" tabindex="-1" aria-labelledby="recurringModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="recurringModalLabel">🔁 Gastos Recurrentes</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="text-muted small mb-3">Movimientos que se generan automáticamente cada mes (alquiler, suscripciones, sueldo...).</p>
+                    <div class="mb-3">
+                        <button type="button" class="btn btn-outline-primary btn-sm" id="btnAddRecurring">+ Agregar recurrente</button>
+                    </div>
+                    <div id="recurringList" class="row g-3">
+                        <!-- Se llena desde JS -->
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cerrar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Configurar Presupuestos -->
+    <div class="modal fade" id="budgetModal" tabindex="-1" aria-labelledby="budgetModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="budgetModalLabel">💰 Configurar Presupuestos</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="text-muted small mb-3">Definí el tope mensual por categoría. Dejá en 0 o vacío para sin límite.</p>
+                    <div class="row g-3" id="budgetFormFields">
+                        <!-- Se llena desde JS -->
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="button" class="btn btn-primary" id="btnSaveBudgets">Guardar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script src="src/finance.js"></script>
+    <script src="src/storage.js"></script>
+    <script src="src/toast.js"></script>
     <script src="app.js"></script>
+    <script>
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('/sw.js');
+        }
+        // Inicializar container de toasts
+        document.addEventListener('DOMContentLoaded', () => {
+            window.toast.initToastContainer();
+        });
+    </script>
 </body>
 </html>

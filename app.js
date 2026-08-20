@@ -20,24 +20,23 @@ let entries = [];           // fuente de verdad en memoria
 let filterType = '';        // '' | 'expense' | 'income'
 let filterCategory = '';    // '' = todas
 let filterMonth = '';       // '' = todos, formato YYYY-MM
+let filterSearch = '';      // búsqueda en descripción/categoría
 let editingId = null;       // null = nuevo, string = editando
+let searchDebounceTimer = null;
 
 // --- Persistencia -------------------------------------------------
 
-function loadFromStorage() {
+async function loadFromStorage() {
     try {
-        const raw = localStorage.getItem(STORAGE_KEY);
-        entries = raw ? JSON.parse(raw) : [];
-        // Backward compat: entries sin `tipo` son 'expense'
-        entries = entries.map(e => ({ ...e, tipo: e.tipo || 'expense' }));
+        entries = await storage.load();
     } catch (err) {
-        console.error('No se pudo leer localStorage, arrancamos vacíos.', err);
+        console.error('No se pudo leer storage, arrancamos vacíos.', err);
         entries = [];
     }
 }
 
-function saveToStorage() {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
+async function saveToStorage() {
+    await storage.save(entries);
 }
 
 // --- Auto-categorización con IA local (Ollama) -------------------
@@ -45,7 +44,7 @@ function saveToStorage() {
 async function autoCategorize() {
     const desc = document.getElementById('description').value.trim();
     if (!desc) {
-        alert('Escribí una descripción primero.');
+        toast.showWarning('Escribí una descripción primero.');
         return;
     }
 
@@ -92,12 +91,12 @@ Respondé SOLO con el nombre exacto de la categoría, sin puntos ni explicacione
             if (partial) {
                 document.getElementById('category').value = partial;
             } else {
-                alert(`Gemma 4 sugirió "${suggestion}" pero no coincide con ninguna categoría.\nCategorías: ${allCats.join(', ')}`);
+                toast.showWarning(`Gemma 4 sugirió "${suggestion}" pero no coincide con ninguna categoría. Categorías: ${allCats.join(', ')}`);
             }
         }
     } catch (err) {
         console.error('Error con Ollama:', err);
-        alert('No se pudo conectar con Gemma 4. ¿Está corriendo Ollama? (ollama serve)');
+        toast.showError('No se pudo conectar con Gemma 4. ¿Está corriendo Ollama? (ollama serve)');
     } finally {
         btn.disabled = false;
         btn.textContent = '🧠 Auto';
@@ -106,7 +105,7 @@ Respondé SOLO con el nombre exacto de la categoría, sin puntos ni explicacione
 
 // --- CRUD ---------------------------------------------------------
 
-function addEntry({ tipo, amount, category, description, date }) {
+async function addEntry({ tipo, amount, category, description, date }) {
     const newEntry = {
         id: generateId(),
         tipo,
@@ -116,24 +115,24 @@ function addEntry({ tipo, amount, category, description, date }) {
         fecha: date
     };
     entries = [...entries, newEntry];
-    saveToStorage();
+    await saveToStorage();
     render();
 }
 
-function updateEntry({ id, tipo, amount, category, description, date }) {
+async function updateEntry({ id, tipo, amount, category, description, date }) {
     entries = entries.map(e =>
         e.id === id
             ? { ...e, tipo, monto: Number(amount), categoria: category, descripcion: description.trim(), fecha: date }
             : e
     );
-    saveToStorage();
+    await saveToStorage();
     render();
 }
 
-function deleteEntry(id) {
+async function deleteEntry(id) {
     if (!confirm('¿Borrar este movimiento?')) return;
     entries = entries.filter(e => e.id !== id);
-    saveToStorage();
+    await saveToStorage();
     render();
 }
 
@@ -143,7 +142,8 @@ function getFilteredEntries() {
     return filterEntries(entries, {
         type: filterType,
         category: filterCategory,
-        month: filterMonth
+        month: filterMonth,
+        search: filterSearch
     });
 }
 
@@ -153,7 +153,7 @@ function renderCategories() {
     const select = document.getElementById('category');
     const filterSelect = document.getElementById('filterCategory');
     const cats = getAllCategories();
-    const options = cats.map(c => `<option value="${c}">${c}</option>`).join('');
+    const options = cats.map(c => `<option value="${escapeHTML(c)}">${escapeHTML(c)}</option>`).join('');
     select.innerHTML = options;
     // El filtro de categoría arranca con la opción "Todas"
     filterSelect.innerHTML = '<option value="">Todas</option>' + options;
@@ -206,17 +206,32 @@ function renderTable() {
     // Ordenamos por fecha descendente (más reciente arriba)
     const sorted = [...filtered].sort((a, b) => b.fecha.localeCompare(a.fecha));
 
+    const now = new Date();
+    const currentMonth = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
+    const budgetProgress = calculateBudgetProgress(entries, budgets, currentMonth);
+    const budgetMap = Object.fromEntries(budgetProgress.map(p => [p.categoria, p]));
+
     tbody.innerHTML = sorted.map(e => {
         const isIncome = e.tipo === 'income';
         const badgeClass = isIncome ? 'bg-success' : 'bg-danger';
         const badgeText = isIncome ? '💰 Ingreso' : '💸 Gasto';
         const montoClass = isIncome ? 'text-success fw-bold' : 'monto';
 
+        // Budget badge para gastos
+        let catBadge = `<span class="badge bg-secondary">${escapeHTML(e.categoria)}</span>`;
+        if (!isIncome && budgetMap[e.categoria]) {
+            const bp = budgetMap[e.categoria];
+            let badgeCls = 'bg-success';
+            if (bp.estado === 'advertencia') badgeCls = 'bg-warning text-dark';
+            else if (bp.estado === 'excedido') badgeCls = 'bg-danger';
+            catBadge = `<span class="badge ${badgeCls}" title="${bp.porcentaje}% usado">${escapeHTML(e.categoria)}</span>`;
+        }
+
         return `
         <tr>
             <td>${escapeHTML(e.fecha)}</td>
             <td><span class="badge ${badgeClass}">${badgeText}</span></td>
-            <td><span class="badge bg-secondary">${escapeHTML(e.categoria)}</span></td>
+            <td>${catBadge}</td>
             <td>${e.descripcion ? escapeHTML(e.descripcion) : '<span class="text-muted">—</span>'}</td>
             <td class="text-end ${montoClass}">${isIncome ? '+' : '-'}${formatAmount(e.monto)}</td>
             <td class="text-end">
@@ -343,11 +358,403 @@ function toggleDarkMode() {
     renderCharts();
 }
 
+// --- Render: Dashboard ----------------------------------------------
+
+function renderDashboard() {
+    const now = new Date();
+    const year = now.getUTCFullYear();
+    const month = now.getUTCMonth() + 1;
+    const currentMonth = `${year}-${String(month).padStart(2, '0')}`;
+    const daysLeft = getDaysInMonth(year, month) - now.getUTCDate();
+
+    const avg = calculateDailyAverage(entries, currentMonth);
+    const projection = calculateProjection(entries, currentMonth);
+    const comparison = calculateComparison(entries, currentMonth);
+
+    document.getElementById('dashAvgDaily').textContent = formatAmount(avg);
+    document.getElementById('dashProjection').textContent = formatAmount(projection);
+
+    // Comparativa
+    const compEl = document.getElementById('dashComparison');
+    if (comparison.prevExpenses === 0 && comparison.currentExpenses === 0) {
+        compEl.textContent = '—';
+        compEl.className = 'h4 mb-0 text-muted';
+    } else if (comparison.prevExpenses === 0) {
+        compEl.textContent = formatAmount(comparison.currentExpenses);
+        compEl.className = 'h4 mb-0 text-danger';
+    } else {
+        const sign = comparison.delta >= 0 ? '+' : '';
+        const pct = comparison.percent.toFixed(1);
+        compEl.textContent = `${sign}${pct}%`;
+        compEl.className = 'h4 mb-0 ' + (comparison.delta <= 0 ? 'text-success' : 'text-danger');
+    }
+
+    document.getElementById('dashDaysLeft').textContent = daysLeft;
+}
+
+// --- Render: Gráfico de tendencia -----------------------------------
+
+let chartTrend = null;
+
+function renderTrendChart() {
+    const canvas = document.getElementById('chartTrend');
+    const emptyEl = document.getElementById('trendEmpty');
+    const trend = calculateMonthlyTrend(entries, 12);
+
+    const hasData = trend.some(t => t.gastos > 0 || t.ingresos > 0);
+
+    if (!hasData) {
+        canvas.classList.add('d-none');
+        emptyEl.classList.remove('d-none');
+        if (chartTrend) { chartTrend.destroy(); chartTrend = null; }
+        return;
+    }
+
+    emptyEl.classList.add('d-none');
+    canvas.classList.remove('d-none');
+
+    const gridColor = getComputedStyle(document.documentElement).getPropertyValue('--bs-border-color').trim() || '#dee2e6';
+    const textColor = getComputedStyle(document.documentElement).getPropertyValue('--bs-body-color').trim() || '#212529';
+
+    const labels = trend.map(t => t.label);
+    const gastos = trend.map(t => t.gastos);
+    const ingresos = trend.map(t => t.ingresos);
+
+    if (chartTrend) { chartTrend.destroy(); chartTrend = null; }
+
+    const ctx = canvas.getContext('2d');
+    chartTrend = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels,
+            datasets: [
+                {
+                    label: 'Gastos',
+                    data: gastos,
+                    borderColor: '#dc3545',
+                    backgroundColor: 'rgba(220, 53, 69, 0.1)',
+                    fill: true,
+                    tension: 0.3,
+                    pointRadius: 4,
+                    pointHoverRadius: 6
+                },
+                {
+                    label: 'Ingresos',
+                    data: ingresos,
+                    borderColor: '#198754',
+                    backgroundColor: 'rgba(25, 135, 84, 0.1)',
+                    fill: true,
+                    tension: 0.3,
+                    pointRadius: 4,
+                    pointHoverRadius: 6
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+                legend: { position: 'bottom', labels: { color: textColor } },
+                tooltip: {
+                    callbacks: {
+                        label: (context) => `${context.dataset.label}: ${formatAmount(context.raw)}`
+                    }
+                }
+            },
+            scales: {
+                x: { grid: { color: gridColor }, ticks: { color: textColor } },
+                y: {
+                    grid: { color: gridColor },
+                    ticks: { color: textColor, callback: v => formatAmount(v) },
+                    beginAtZero: true
+                }
+            }
+        }
+    });
+}
+
+let budgets = {}; // { categoria: monto }
+
+async function loadBudgets() {
+    try {
+        budgets = await storage.loadBudgets() || {};
+    } catch {
+        budgets = {};
+    }
+}
+
+function renderBudgets() {
+    const container = document.getElementById('budgetsContainer');
+    const emptyEl = document.getElementById('budgetsEmpty');
+    const now = new Date();
+    const currentMonth = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
+
+    const progress = calculateBudgetProgress(entries, budgets, currentMonth);
+
+    if (progress.length === 0) {
+        container.innerHTML = '';
+        emptyEl.classList.remove('d-none');
+        return;
+    }
+
+    emptyEl.classList.add('d-none');
+    container.innerHTML = progress.map(p => {
+        const pct = p.porcentaje;
+        let badgeClass = 'bg-success';
+        if (p.estado === 'advertencia') badgeClass = 'bg-warning text-dark';
+        else if (p.estado === 'excedido') badgeClass = 'bg-danger';
+        return `
+        <div class="col-md-4 col-6">
+            <div class="card">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center mb-1">
+                        <span class="badge bg-secondary">${escapeHTML(p.categoria)}</span>
+                        <span class="badge ${badgeClass}">${p.estado.toUpperCase()}</span>
+                    </div>
+                    <div class="progress mb-1" style="height: 8px;">
+                        <div class="progress-bar ${badgeClass}" role="progressbar" style="width: ${Math.min(pct, 100)}%"></div>
+                    </div>
+                    <small class="text-muted">${formatAmount(p.actual)} / ${formatAmount(p.presupuesto)} (${pct}%)</small>
+                </div>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+function setupBudgetModal() {
+    const formFields = document.getElementById('budgetFormFields');
+    const saveBtn = document.getElementById('btnSaveBudgets');
+
+    // Llenar formulario con todas las categorías
+    const allCats = getAllCategories();
+    formFields.innerHTML = allCats.map(cat => {
+        const value = budgets[cat] || '';
+        return `
+        <div class="col-md-6">
+            <label class="form-label">${escapeHTML(cat)}</label>
+            <div class="input-group">
+                <span class="input-group-text">€</span>
+                <input type="number" class="form-control budget-input" data-category="${escapeHTML(cat)}" step="0.01" min="0" value="${value}" placeholder="Sin límite">
+            </div>
+        </div>`;
+    }).join('');
+
+    // Guardar
+    saveBtn.onclick = async () => {
+        const inputs = document.querySelectorAll('.budget-input');
+        const newBudgets = {};
+        inputs.forEach(input => {
+            const cat = input.dataset.category;
+            const val = input.value;
+            if (val && Number(val) > 0) {
+                newBudgets[cat] = Number(val);
+            }
+        });
+        budgets = newBudgets;
+        await storage.saveBudgets(budgets);
+        renderBudgets();
+        render(); // actualiza badges en tabla
+        bootstrap.Modal.getInstance(document.getElementById('budgetModal')).hide();
+    };
+}
+
+// --- Recurrentes ----------------------------------------------------
+
+let recurring = []; // array de { id, tipo, monto, categoria, descripcion, diaMes, fechaInicio, activo }
+
+async function loadRecurring() {
+    try {
+        recurring = await storage.loadRecurring() || [];
+    } catch {
+        recurring = [];
+    }
+}
+
+// Verificar y generar recurrentes para el mes actual
+async function checkAndGenerateRecurring() {
+    const now = new Date();
+    const currentMonth = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
+
+    const toCreate = generateRecurringEntries(recurring, entries, currentMonth);
+
+    for (const entry of toCreate) {
+        addEntry(entry);
+    }
+
+    if (toCreate.length > 0) {
+        console.log(`Generados ${toCreate.length} movimientos recurrentes para ${currentMonth}`);
+    }
+}
+
+function renderRecurring() {
+    const container = document.getElementById('recurringContainer');
+    const emptyEl = document.getElementById('recurringEmpty');
+
+    if (recurring.length === 0) {
+        container.innerHTML = '';
+        emptyEl.classList.remove('d-none');
+        return;
+    }
+
+    emptyEl.classList.add('d-none');
+    container.innerHTML = recurring.map(r => {
+        const tipoBadge = r.tipo === 'income' ? 'bg-success' : 'bg-danger';
+        const tipoText = r.tipo === 'income' ? '💰 Ingreso' : '💸 Gasto';
+        const activoBadge = r.activo ? 'bg-success' : 'bg-secondary';
+        const activoText = r.activo ? 'Activo' : 'Inactivo';
+
+        return `
+        <div class="col-md-6 col-lg-4">
+            <div class="card">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <span class="badge ${tipoBadge}">${tipoText}</span>
+                        <span class="badge ${activoBadge}">${activoText}</span>
+                    </div>
+                    <h6 class="mb-1">${escapeHTML(r.descripcion)}</h6>
+                    <small class="text-muted">${escapeHTML(r.categoria)} • Día ${r.diaMes} • ${formatAmount(r.monto)}</small>
+                    <div class="btn-group btn-group-sm mt-2 w-100">
+                        <button type="button" class="btn btn-outline-secondary toggle-recurring" data-id="${r.id}" data-activo="${r.activo}">
+                            ${r.activo ? 'Pausar' : 'Activar'}
+                        </button>
+                        <button type="button" class="btn btn-outline-danger delete-recurring" data-id="${r.id}">
+                            Eliminar
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>`;
+    }).join('');
+
+    // Event listeners
+    document.querySelectorAll('.toggle-recurring').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+            const id = e.target.dataset.id;
+            const r = recurring.find(x => x.id === id);
+            if (r) {
+                recurring = recurring.map(x =>
+                    x.id === id ? { ...x, activo: !x.activo } : x
+                );
+                await storage.saveRecurring(recurring);
+                renderRecurring();
+            }
+        });
+    });
+
+    document.querySelectorAll('.delete-recurring').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+            const id = e.target.dataset.id;
+            if (confirm('¿Eliminar este recurrente?')) {
+                recurring = recurring.filter(x => x.id !== id);
+                await storage.saveRecurring(recurring);
+                renderRecurring();
+            }
+        });
+    });
+}
+
+function setupRecurringModal() {
+    const addBtn = document.getElementById('btnAddRecurring');
+    const list = document.getElementById('recurringList');
+
+    addBtn.onclick = () => {
+        const div = document.createElement('div');
+        div.className = 'col-12 recurring-form';
+        div.innerHTML = `
+            <div class="card p-3">
+                <h6 class="mb-3">Nuevo recurrente</h6>
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <label class="form-label">Tipo</label>
+                        <select class="form-select rec-tipo">
+                            <option value="expense">💸 Gasto</option>
+                            <option value="income">💰 Ingreso</option>
+                        </select>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Monto</label>
+                        <div class="input-group">
+                            <span class="input-group-text">€</span>
+                            <input type="number" class="form-control rec-monto" step="0.01" min="0" required>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Categoría</label>
+                        <select class="form-select rec-categoria" required>
+                            <option value="">Seleccioná...</option>
+                            ${getAllCategories().map(c => `<option value="${escapeHTML(c)}">${escapeHTML(c)}</option>`).join('')}
+                        </select>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Descripción</label>
+                        <input type="text" class="form-control rec-descripcion" maxlength="100" required placeholder="Ej: Alquiler, Netflix, Sueldo">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Día del mes (1-28)</label>
+                        <input type="number" class="form-control rec-diaMes" min="1" max="28" value="1" required>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Fecha inicio</label>
+                        <input type="month" class="form-control rec-fechaInicio" value="${todayISO().slice(0, 7)}" required>
+                    </div>
+                    <div class="col-12">
+                        <button type="button" class="btn btn-primary save-recurring">Guardar</button>
+                        <button type="button" class="btn btn-secondary cancel-recurring">Cancelar</button>
+                    </div>
+                </div>
+            </div>`;
+        list.prepend(div);
+
+        div.querySelector('.save-recurring').onclick = async () => {
+            const tipo = div.querySelector('.rec-tipo').value;
+            const monto = Number(div.querySelector('.rec-monto').value);
+            const categoria = div.querySelector('.rec-categoria').value;
+            const descripcion = div.querySelector('.rec-descripcion').value.trim();
+            const diaMes = Number(div.querySelector('.rec-diaMes').value);
+            const fechaInicio = div.querySelector('.rec-fechaInicio').value;
+
+            if (!categoria || !descripcion || !monto || !diaMes || !fechaInicio) {
+                toast.showWarning('Completá todos los campos.');
+                return;
+            }
+            if (diaMes < 1 || diaMes > 28) {
+                toast.showWarning('El día debe ser entre 1 y 28.');
+                return;
+            }
+
+            const newRecurring = {
+                id: generateId(),
+                tipo,
+                monto,
+                categoria,
+                descripcion,
+                diaMes,
+                fechaInicio,
+                activo: true
+            };
+
+            recurring = [...recurring, newRecurring];
+            await storage.saveRecurring(recurring);
+            renderRecurring();
+            div.remove();
+        };
+
+        div.querySelector('.cancel-recurring').onclick = () => div.remove();
+    };
+
+    renderRecurring();
+}
+
 // --- Render principal ---------------------------------------------
 
 function render() {
     renderTable();
     renderSummary();
+    renderDashboard();
+    renderBudgets();
+    renderTrendChart();
+    renderRecurring();
     renderCharts();
 }
 
@@ -355,7 +762,7 @@ function render() {
 
 function exportCSV() {
     if (entries.length === 0) {
-        alert('No hay movimientos para exportar.');
+        toast.showWarning('No hay movimientos para exportar.');
         return;
     }
 
@@ -394,7 +801,7 @@ function exportCSV() {
 
 function exportJSON() {
     if (entries.length === 0) {
-        alert('No hay movimientos para exportar.');
+        toast.showWarning('No hay movimientos para exportar.');
         return;
     }
 
@@ -419,13 +826,18 @@ function exportJSON() {
 
 function importJSON(file) {
     const reader = new FileReader();
-    reader.onload = (e) => {
+    reader.onload = async (e) => {
         try {
             const data = JSON.parse(e.target.result);
 
             // Validar estructura
             if (!data.entries || !Array.isArray(data.entries)) {
-                alert('El archivo no tiene datos válidos. Tiene que ser un JSON exportado desde esta app.');
+                toast.showError('El archivo no tiene datos válidos. Tiene que ser un JSON exportado desde esta app.');
+                return;
+            }
+
+            if (data.entries.length > 10000) {
+                toast.showError('El archivo contiene demasiados movimientos (máximo 10.000). Dividilo en partes más chicas.');
                 return;
             }
 
@@ -455,7 +867,7 @@ function importJSON(file) {
             });
 
             if (incoming.length === 0) {
-                alert('El archivo no contiene movimientos válidos.');
+                toast.showWarning('El archivo no contiene movimientos válidos.');
                 return;
             }
 
@@ -464,11 +876,11 @@ function importJSON(file) {
             if (!confirm(msg)) return;
 
             entries = incoming;
-            saveToStorage();
+            await saveToStorage();
             render();
-            alert(`Importados ${incoming.length} movimientos correctamente.${skipNote}`);
+            toast.showSuccess(`Importados ${incoming.length} movimientos correctamente.${skipNote}`);
         } catch (err) {
-            alert('Error al leer el archivo. Asegurate de que sea un JSON válido exportado desde esta app.');
+            toast.showError('Error al leer el archivo. Asegurate de que sea un JSON válido exportado desde esta app.');
             console.error('Import error:', err);
         }
     };
@@ -477,8 +889,11 @@ function importJSON(file) {
 
 // --- Eventos ------------------------------------------------------
 
-function init() {
-    loadFromStorage();
+async function init() {
+    await loadFromStorage();
+    await loadBudgets();
+    await loadRecurring();
+    await checkAndGenerateRecurring();
 
     // Fecha de hoy por defecto
     document.getElementById('date').value = todayISO();
@@ -492,6 +907,10 @@ function init() {
     // Render inicial
     render();
 
+    // Budget modal
+    setupBudgetModal();
+    setupRecurringModal();
+
     // Submit del formulario (alta o edición)
     document.getElementById('expenseForm').addEventListener('submit', (e) => {
         e.preventDefault();
@@ -503,7 +922,7 @@ function init() {
 
         const errors = validateEntry({ tipo, amount, category, description });
         if (errors.length > 0) {
-            alert(errors[0]);
+            toast.showError(errors[0]);
             return;
         }
 
@@ -538,6 +957,22 @@ function init() {
         filterMonth = e.target.value;
         render();
     });
+
+    // Búsqueda con debounce
+    document.getElementById('filterSearch').addEventListener('input', (e) => {
+        clearTimeout(searchDebounceTimer);
+        searchDebounceTimer = setTimeout(() => {
+            filterSearch = e.target.value;
+            render();
+        }, 300);
+    });
+
+    document.getElementById('btnClearSearch').addEventListener('click', () => {
+        filterSearch = '';
+        document.getElementById('filterSearch').value = '';
+        render();
+    });
+
     document.getElementById('btnClearFilters').addEventListener('click', () => {
         filterType = '';
         filterCategory = '';

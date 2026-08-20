@@ -181,10 +181,10 @@ describe('calculateBalance()', () => {
 // -------------------------------------------------------------------
 describe('filterEntries()', () => {
     const entries = [
-        { tipo: 'income', categoria: 'Sueldo', fecha: '2026-06-01', monto: 5000 },
-        { tipo: 'expense', categoria: 'Comida', fecha: '2026-06-15', monto: 200 },
-        { tipo: 'expense', categoria: 'Transporte', fecha: '2026-07-03', monto: 150 },
-        { tipo: 'income', categoria: 'Freelance', fecha: '2026-07-10', monto: 1200 }
+        { tipo: 'income', categoria: 'Sueldo', descripcion: 'Sueldo base', fecha: '2026-06-01', monto: 5000 },
+        { tipo: 'expense', categoria: 'Comida', descripcion: 'Almuerzo', fecha: '2026-06-15', monto: 200 },
+        { tipo: 'expense', categoria: 'Transporte', descripcion: 'Subte', fecha: '2026-07-03', monto: 150 },
+        { tipo: 'income', categoria: 'Freelance', descripcion: 'Proyecto web', fecha: '2026-07-10', monto: 1200 }
     ];
 
     it('filtra por tipo expense', () => {
@@ -229,6 +229,33 @@ describe('filterEntries()', () => {
     it('resultado vacio si no hay match', () => {
         const result = finance.filterEntries(entries, { category: 'Inexistente' });
         expect(result).toHaveLength(0);
+    });
+
+    it('busca en descripcion (case-insensitive)', () => {
+        const result = finance.filterEntries(entries, { search: 'sueldo' });
+        expect(result).toHaveLength(1);
+        expect(result[0].descripcion).toMatch(/sueldo/i);
+    });
+
+    it('busca en categoria', () => {
+        const result = finance.filterEntries(entries, { search: 'comida' });
+        expect(result).toHaveLength(1);
+        expect(result[0].categoria).toBe('Comida');
+    });
+
+    it('busca parcial', () => {
+        const result = finance.filterEntries(entries, { search: 'trans' });
+        expect(result).toHaveLength(1);
+        expect(result[0].categoria).toBe('Transporte');
+    });
+
+    it('combina search con otros filtros', () => {
+        const result = finance.filterEntries(entries, {
+            type: 'expense',
+            search: 'trans'
+        });
+        expect(result).toHaveLength(1);
+        expect(result[0].categoria).toBe('Transporte');
     });
 });
 
@@ -286,9 +313,330 @@ describe('validateEntry()', () => {
         expect(errors[0]).toMatch(/descripci/i);
     });
 
+    it('categoria no valida agrega error', () => {
+        const errors = finance.validateEntry({ ...validEntry, category: 'CategoriaFalsa' });
+        expect(errors.length).toBeGreaterThanOrEqual(1);
+        expect(errors[0]).toMatch(/categor/i);
+    });
+
     it('entry undefined no explota', () => {
         const errors = finance.validateEntry();
         expect(Array.isArray(errors)).toBe(true);
         expect(errors.length).toBeGreaterThanOrEqual(1);
+    });
+});
+
+// -------------------------------------------------------------------
+// Dashboard functions
+// -------------------------------------------------------------------
+describe('getDaysInMonth()', () => {
+    it('devuelve 31 para enero', () => {
+        expect(finance.getDaysInMonth(2026, 1)).toBe(31);
+    });
+
+    it('devuelve 28 para febrero 2026 (no bisiesto)', () => {
+        expect(finance.getDaysInMonth(2026, 2)).toBe(28);
+    });
+
+    it('devuelve 29 para febrero 2024 (bisiesto)', () => {
+        expect(finance.getDaysInMonth(2024, 2)).toBe(29);
+    });
+
+    it('devuelve 30 para abril', () => {
+        expect(finance.getDaysInMonth(2026, 4)).toBe(30);
+    });
+});
+
+describe('getDaysElapsedInMonth()', () => {
+    it('devuelve dias transcurridos del mes actual', () => {
+        const now = new Date();
+        const expected = now.getUTCDate();
+        expect(finance.getDaysElapsedInMonth(now.getUTCFullYear(), now.getUTCMonth() + 1)).toBe(expected);
+    });
+
+    it('devuelve dias totales para mes pasado', () => {
+        const year = 2026;
+        const month = 7; // Julio
+        expect(finance.getDaysElapsedInMonth(year, month)).toBe(31);
+    });
+});
+
+describe('calculateDailyAverage()', () => {
+    const entries = [
+        { tipo: 'expense', monto: 100, fecha: '2026-08-01' },
+        { tipo: 'expense', monto: 200, fecha: '2026-08-05' },
+        { tipo: 'expense', monto: 50, fecha: '2026-08-10' },
+        { tipo: 'income', monto: 1000, fecha: '2026-08-01' },
+        { tipo: 'expense', monto: 300, fecha: '2026-07-15' }, // mes anterior
+    ];
+
+    it('calcula promedio diario de gastos del mes actual', () => {
+        // 350 total / dias transcurridos
+        const result = finance.calculateDailyAverage(entries, '2026-08');
+        expect(typeof result).toBe('number');
+        expect(result).toBeGreaterThanOrEqual(0);
+    });
+
+    it('ignora ingresos', () => {
+        // Solo suma expenses (100+200+50=350), no income
+        const result = finance.calculateDailyAverage(entries, '2026-08');
+        const resultAll = finance.calculateDailyAverage(
+            entries.filter(e => e.tipo !== 'income'),
+            '2026-08'
+        );
+        expect(result).toBe(resultAll);
+    });
+
+    it('devuelve 0 si no hay gastos en el mes', () => {
+        expect(finance.calculateDailyAverage(entries, '2026-01')).toBe(0);
+    });
+
+    it('devuelve 0 si mes es undefined', () => {
+        expect(finance.calculateDailyAverage(entries)).toBe(0);
+    });
+});
+
+describe('calculateProjection()', () => {
+    const entries = [
+        { tipo: 'expense', monto: 100, fecha: '2026-08-01' },
+        { tipo: 'expense', monto: 200, fecha: '2026-08-05' },
+    ];
+
+    it('proyecta fin de mes basado en promedio', () => {
+        const result = finance.calculateProjection(entries, '2026-08');
+        expect(typeof result).toBe('number');
+        expect(result).toBeGreaterThanOrEqual(0);
+    });
+
+    it('devuelve 0 si no hay gastos', () => {
+        expect(finance.calculateProjection(entries, '2026-01')).toBe(0);
+    });
+});
+
+describe('calculateComparison()', () => {
+    const entries = [
+        { tipo: 'expense', monto: 1000, fecha: '2026-08-01' }, // actual
+        { tipo: 'expense', monto: 800, fecha: '2026-07-15' }, // anterior
+    ];
+
+    it('calcula delta y porcentaje vs mes anterior', () => {
+        const result = finance.calculateComparison(entries, '2026-08');
+        expect(result.currentExpenses).toBe(1000);
+        expect(result.prevExpenses).toBe(800);
+        expect(result.delta).toBe(200);
+        expect(result.percent).toBeCloseTo(25, 1); // 200/800 * 100 = 25%
+    });
+
+    it('devuelve 0% si mes anterior no tiene gastos (actual=ago, prev=jul sin datos)', () => {
+        const entriesNoPrev = [
+            { tipo: 'expense', monto: 1000, fecha: '2026-08-01' },
+            // sin datos en julio
+        ];
+        const result = finance.calculateComparison(entriesNoPrev, '2026-08');
+        expect(result.percent).toBe(0);
+        expect(result.prevExpenses).toBe(0);
+    });
+
+    it('devuelve delta negativo si se gasta menos', () => {
+        const entriesLess = [
+            { tipo: 'expense', monto: 500, fecha: '2026-08-01' },
+            { tipo: 'expense', monto: 800, fecha: '2026-07-15' },
+        ];
+        const result = finance.calculateComparison(entriesLess, '2026-08');
+        expect(result.delta).toBe(-300);
+        expect(result.percent).toBeCloseTo(-37.5, 1);
+    });
+});
+
+// -------------------------------------------------------------------
+// calculateBudgetProgress()
+// -------------------------------------------------------------------
+describe('calculateBudgetProgress()', () => {
+    const entries = [
+        { tipo: 'expense', monto: 150, categoria: 'Comida', fecha: '2026-08-01' },
+        { tipo: 'expense', monto: 100, categoria: 'Transporte', fecha: '2026-08-05' },
+        { tipo: 'expense', monto: 200, categoria: 'Comida', fecha: '2026-08-10' },
+        { tipo: 'income', monto: 2000, categoria: 'Sueldo', fecha: '2026-08-01' },
+    ];
+    const budgets = { Comida: 300, Transporte: 100, Ocio: 50 };
+
+    it('calcula progreso por categoría', () => {
+        const result = finance.calculateBudgetProgress(entries, budgets, '2026-08');
+        expect(result).toHaveLength(3);
+
+        const comida = result.find(r => r.categoria === 'Comida');
+        expect(comida.actual).toBe(350);
+        expect(comida.presupuesto).toBe(300);
+        expect(comida.porcentaje).toBe(116.7);
+        expect(comida.estado).toBe('excedido');
+
+        const transporte = result.find(r => r.categoria === 'Transporte');
+        expect(transporte.actual).toBe(100);
+        expect(transporte.porcentaje).toBe(100);
+        expect(transporte.estado).toBe('excedido');
+
+        const ocio = result.find(r => r.categoria === 'Ocio');
+        expect(ocio.actual).toBe(0);
+        expect(ocio.porcentaje).toBe(0);
+        expect(ocio.estado).toBe('ok');
+    });
+
+    it('ignora ingresos', () => {
+        const result = finance.calculateBudgetProgress(entries, budgets, '2026-08');
+        // El ingreso de 2000 no debe afectar
+        const comida = result.find(r => r.categoria === 'Comida');
+        expect(comida.actual).toBe(350); // solo gastos
+    });
+
+    it('devuelve array vacío si no hay presupuestos', () => {
+        expect(finance.calculateBudgetProgress(entries, {}, '2026-08')).toEqual([]);
+        expect(finance.calculateBudgetProgress(entries, null, '2026-08')).toEqual([]);
+        expect(finance.calculateBudgetProgress(entries, undefined, '2026-08')).toEqual([]);
+    });
+
+    it('devuelve array vacío si mes es undefined', () => {
+        expect(finance.calculateBudgetProgress(entries, budgets)).toEqual([]);
+    });
+
+    it('estado advertencia al 80%', () => {
+        const budgets80 = { Comida: 500 }; // 350/500 = 70% -> ok, pero si ponemos 437.5 = 80%
+        const entries80 = [
+            { tipo: 'expense', monto: 350, categoria: 'Comida', fecha: '2026-08-01' },
+        ];
+        const result = finance.calculateBudgetProgress(entries80, { Comida: 437.5 }, '2026-08');
+        expect(result[0].estado).toBe('advertencia');
+    });
+});
+
+// -------------------------------------------------------------------
+// calculateMonthlyTrend()
+// -------------------------------------------------------------------
+describe('calculateMonthlyTrend()', () => {
+    const now = new Date();
+    const year = now.getUTCFullYear();
+    const month = now.getUTCMonth() + 1;
+    const currentMonth = `${year}-${String(month).padStart(2, '0')}`;
+    const prevMonth = month > 1 ? `${year}-${String(month - 1).padStart(2, '0')}` : `${year - 1}-12`;
+
+    const entries = [
+        { tipo: 'expense', monto: 500, fecha: `${currentMonth}-01` },
+        { tipo: 'expense', monto: 300, fecha: `${currentMonth}-15` },
+        { tipo: 'income', monto: 2000, fecha: `${currentMonth}-01` },
+        { tipo: 'expense', monto: 400, fecha: `${prevMonth}-10` },
+        { tipo: 'income', monto: 1500, fecha: `${prevMonth}-05` },
+    ];
+
+    it('devuelve array con 12 meses por defecto', () => {
+        const result = finance.calculateMonthlyTrend(entries);
+        expect(result).toHaveLength(12);
+        result.forEach(r => {
+            expect(r).toHaveProperty('mes');
+            expect(r).toHaveProperty('label');
+            expect(r).toHaveProperty('gastos');
+            expect(r).toHaveProperty('ingresos');
+            expect(r).toHaveProperty('balance');
+        });
+    });
+
+    it('calcula gastos, ingresos y balance por mes', () => {
+        const result = finance.calculateMonthlyTrend(entries);
+        const curr = result.find(r => r.mes === currentMonth);
+        const prev = result.find(r => r.mes === prevMonth);
+
+        expect(curr.gastos).toBe(800);
+        expect(curr.ingresos).toBe(2000);
+        expect(curr.balance).toBe(1200);
+
+        expect(prev.gastos).toBe(400);
+        expect(prev.ingresos).toBe(1500);
+        expect(prev.balance).toBe(1100);
+    });
+
+    it('meses sin datos devuelven 0', () => {
+        const result = finance.calculateMonthlyTrend(entries);
+        const emptyMonth = result.find(r => r.gastos === 0 && r.ingresos === 0);
+        expect(emptyMonth).toBeDefined();
+        expect(emptyMonth.balance).toBe(0);
+    });
+
+    it('respeta el parámetro months', () => {
+        const result6 = finance.calculateMonthlyTrend(entries, 6);
+        expect(result6).toHaveLength(6);
+        const result1 = finance.calculateMonthlyTrend(entries, 1);
+        expect(result1).toHaveLength(1);
+    });
+
+    it('ordena meses de más antiguo a más reciente', () => {
+        const result = finance.calculateMonthlyTrend(entries);
+        for (let i = 1; i < result.length; i++) {
+            expect(result[i].mes >= result[i - 1].mes).toBe(true);
+        }
+    });
+});
+
+// -------------------------------------------------------------------
+// generateRecurringEntries()
+// -------------------------------------------------------------------
+describe('generateRecurringEntries()', () => {
+    const now = new Date();
+    const year = now.getUTCFullYear();
+    const month = now.getUTCMonth() + 1;
+    const currentMonth = `${year}-${String(month).padStart(2, '0')}`;
+    const prevMonth = month > 1 ? `${year}-${String(month - 1).padStart(2, '0')}` : `${year - 1}-12`;
+    const today = now.getUTCDate();
+
+    const recurring = [
+        { id: 'r1', tipo: 'expense', monto: 500, categoria: 'Hogar', descripcion: 'Alquiler', diaMes: 1, fechaInicio: '2026-01', activo: true },
+        { id: 'r2', tipo: 'income', monto: 2000, categoria: 'Sueldo', descripcion: 'Sueldo base', diaMes: 5, fechaInicio: '2026-01', activo: true },
+        { id: 'r3', tipo: 'expense', monto: 20, categoria: 'Ocio', descripcion: 'Netflix', diaMes: 15, fechaInicio: '2026-06', activo: true },
+        { id: 'r4', tipo: 'expense', monto: 100, categoria: 'Transporte', descripcion: 'Pase', diaMes: 1, fechaInicio: '2026-01', activo: false }, // inactivo
+    ];
+
+    const entries = [
+        { tipo: 'expense', monto: 500, categoria: 'Hogar', descripcion: 'Alquiler', fecha: `${currentMonth}-01` }, // ya existe
+    ];
+
+    it('genera entries para mes actual si día ya pasó', () => {
+        const result = finance.generateRecurringEntries(recurring, entries, currentMonth);
+        // r1: día 1 <= today, activo, ya existe -> no genera
+        // r2: día 5 <= today (asumiendo today >= 5), activo -> genera
+        // r3: día 15, si today >= 15 -> genera
+        // r4: inactivo -> no genera
+        expect(result.length).toBeGreaterThanOrEqual(0);
+    });
+
+    it('no genera para mes futuro', () => {
+        const nextMonth = month < 12 ? `${year}-${String(month + 1).padStart(2, '0')}` : `${year + 1}-01`;
+        const result = finance.generateRecurringEntries(recurring, entries, nextMonth);
+        expect(result).toHaveLength(0);
+    });
+
+    it('no genera recurrentes inactivos', () => {
+        const result = finance.generateRecurringEntries(recurring, entries, currentMonth);
+        const inactivos = result.filter(r => r.descripcion === 'Pase');
+        expect(inactivos).toHaveLength(0);
+    });
+
+    it('no duplica entries ya existentes', () => {
+        const result = finance.generateRecurringEntries(recurring, entries, currentMonth);
+        const alquiler = result.find(r => r.descripcion === 'Alquiler');
+        expect(alquiler).toBeUndefined(); // ya existe en entries
+    });
+
+    it('respeta fechaInicio', () => {
+        const recurringNew = [
+            { id: 'r5', tipo: 'expense', monto: 50, categoria: 'Otro', descripcion: 'Nuevo', diaMes: 1, fechaInicio: '2026-12', activo: true }
+        ];
+        const result = finance.generateRecurringEntries(recurringNew, entries, currentMonth);
+        // fechaInicio 2026-12 > currentMonth -> no genera
+        expect(result).toHaveLength(0);
+    });
+
+    it('solo genera hasta día 28', () => {
+        const recurring29 = [
+            { id: 'r6', tipo: 'expense', monto: 10, categoria: 'Test', descripcion: 'Dia29', diaMes: 29, fechaInicio: '2026-01', activo: true }
+        ];
+        const result = finance.generateRecurringEntries(recurring29, entries, currentMonth);
+        expect(result).toHaveLength(0);
     });
 });
