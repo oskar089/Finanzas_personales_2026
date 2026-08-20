@@ -22,6 +22,8 @@ let filterCategory = '';    // '' = todas
 let filterMonth = '';       // '' = todos, formato YYYY-MM
 let filterSearch = '';      // búsqueda en descripción/categoría
 let editingId = null;       // null = nuevo, string = editando
+let inlineEditingId = null; // null = sin edición inline, string = ID de la fila en edición
+let inlineEditField = null; // null = edición de fila completa, string = campo individual
 let searchDebounceTimer = null;
 
 // --- Persistencia -------------------------------------------------
@@ -188,6 +190,87 @@ function cancelEdit() {
     document.getElementById('tipoExpense').checked = true;
 }
 
+// --- Edición inline en la tabla ------------------------------------
+
+// Cancela la edición inline y re-renderiza la tabla
+function cancelInlineEdit() {
+    inlineEditingId = null;
+    inlineEditField = null;
+    renderTable();
+}
+
+// Guarda los valores de los inputs inline en la entry correspondiente
+async function saveInlineEdit(entryId) {
+    const row = document.querySelector(`tr[data-entry-id="${entryId}"]`);
+    if (!row) return;
+
+    const entry = entries.find(e => e.id === entryId);
+    if (!entry) return;
+
+    // Extraer valores de los inputs de la fila
+    const fechaInput = row.querySelector('.inline-edit-fecha');
+    const descInput = row.querySelector('.inline-edit-descripcion');
+    const montoInput = row.querySelector('.inline-edit-monto');
+
+    const values = {
+        fecha: fechaInput ? fechaInput.value : entry.fecha,
+        descripcion: descInput ? descInput.value : entry.descripcion,
+        monto: montoInput ? montoInput.value : entry.monto
+    };
+
+    const result = parseEntryFromRow(values);
+
+    if (result.errors) {
+        toast.showError(result.errors[0]);
+        return;
+    }
+
+    // Actualizar entry de forma inmutable
+    entries = entries.map(e =>
+        e.id === entryId
+            ? { ...e, fecha: result.fecha, descripcion: result.descripcion, monto: result.monto }
+            : e
+    );
+
+    inlineEditingId = null;
+    inlineEditField = null;
+
+    await saveToStorage();
+    render();
+}
+
+// Genera el HTML para una celda editable (input inline)
+function renderEditableCell(entry, field, value) {
+    const inputType = field === 'fecha' ? 'date' : field === 'monto' ? 'number' : 'text';
+    const stepAttr = field === 'monto' ? ' step="0.01" min="0"' : '';
+    const maxlengthAttr = field === 'descripcion' ? ' maxlength="100"' : '';
+    const inputClass = field === 'monto' ? 'form-control form-control-sm text-end' : 'form-control form-control-sm';
+    return `<input type="${inputType}" class="${inputClass} inline-edit-${field}" value="${field === 'monto' ? entry.monto : escapeHTML(value || '')}"${stepAttr}${maxlengthAttr} data-field="${field}" data-entry-id="${entry.id}">`;
+}
+
+// Inicia edición inline de una celda individual
+function startInlineCellEdit(entryId, field) {
+    inlineEditingId = entryId;
+    inlineEditField = field;
+    renderTable();
+    // Enfocar el input recién creado
+    const input = document.querySelector(`.inline-edit-${field}[data-entry-id="${entryId}"]`);
+    if (input) {
+        input.focus();
+        input.select();
+    }
+}
+
+// Inicia edición inline de toda la fila
+function startInlineRowEdit(entryId) {
+    inlineEditingId = entryId;
+    inlineEditField = null;
+    renderTable();
+    // Enfocar el primer input (fecha)
+    const firstInput = document.querySelector(`tr[data-entry-id="${entryId}"] .inline-edit-fecha`);
+    if (firstInput) firstInput.focus();
+}
+
 // --- Render: Tabla ------------------------------------------------
 
 function renderTable() {
@@ -217,6 +300,11 @@ function renderTable() {
         const badgeText = isIncome ? '💰 Ingreso' : '💸 Gasto';
         const montoClass = isIncome ? 'text-success fw-bold' : 'monto';
 
+        // Determinar si esta fila está en modo edición inline
+        const isInlineEditing = inlineEditingId === e.id;
+        const isSingleField = isInlineEditing && inlineEditField !== null;
+        const isRowEdit = isInlineEditing && inlineEditField === null;
+
         // Budget badge para gastos
         let catBadge = `<span class="badge bg-secondary">${escapeHTML(e.categoria)}</span>`;
         if (!isIncome && budgetMap[e.categoria]) {
@@ -227,13 +315,31 @@ function renderTable() {
             catBadge = `<span class="badge ${badgeCls}" title="${bp.porcentaje}% usado">${escapeHTML(e.categoria)}</span>`;
         }
 
+        // Celda de fecha: editable si edición inline activa
+        const fechaCell = isRowEdit || (isSingleField && inlineEditField === 'fecha')
+            ? renderEditableCell(e, 'fecha', e.fecha)
+            : escapeHTML(e.fecha);
+
+        // Celda de descripción: editable si edición inline activa
+        const descCell = isRowEdit || (isSingleField && inlineEditField === 'descripcion')
+            ? renderEditableCell(e, 'descripcion', e.descripcion)
+            : (e.descripcion ? escapeHTML(e.descripcion) : '<span class="text-muted">—</span>');
+
+        // Celda de monto: editable si edición inline activa
+        const montoCell = isRowEdit || (isSingleField && inlineEditField === 'monto')
+            ? renderEditableCell(e, 'monto', e.monto)
+            : `${isIncome ? '+' : '-'}${formatAmount(e.monto)}`;
+
+        // Clases para celdas en modo edición inline
+        const editCls = isInlineEditing ? ' inline-editing' : '';
+
         return `
-        <tr>
-            <td>${escapeHTML(e.fecha)}</td>
+        <tr data-entry-id="${escapeHTML(e.id)}">
+            <td class="${isInlineEditing ? 'inline-editing' : ''}">${fechaCell}</td>
             <td><span class="badge ${badgeClass}">${badgeText}</span></td>
             <td>${catBadge}</td>
-            <td>${e.descripcion ? escapeHTML(e.descripcion) : '<span class="text-muted">—</span>'}</td>
-            <td class="text-end ${montoClass}">${isIncome ? '+' : '-'}${formatAmount(e.monto)}</td>
+            <td>${descCell}</td>
+            <td class="text-end ${montoClass}${editCls}">${montoCell}</td>
             <td class="text-end">
                 <button class="btn btn-sm btn-outline-primary me-1" data-id="${escapeHTML(e.id)}" data-action="edit">
                     ✏️
@@ -987,14 +1093,95 @@ async function init() {
     document.getElementById('expensesTable').addEventListener('click', (e) => {
         const editBtn = e.target.closest('button[data-action="edit"]');
         const deleteBtn = e.target.closest('button[data-action="delete"]');
+        const inlineInput = e.target.closest('.inline-edit-fecha, .inline-edit-descripcion, .inline-edit-monto');
+
+        if (inlineInput) return; // no procesar clicks en inputs inline
 
         if (editBtn) {
-            const entry = entries.find(entry => entry.id === editBtn.dataset.id);
-            if (entry) enterEditMode(entry);
+            const entryId = editBtn.dataset.id;
+            // Si ya estamos editando esta fila, cancelar
+            if (inlineEditingId === entryId) {
+                cancelInlineEdit();
+            } else {
+                startInlineRowEdit(entryId);
+            }
         }
         if (deleteBtn) {
             deleteEntry(deleteBtn.dataset.id);
         }
+    });
+
+    // Doble clic en celdas para edición individual
+    document.getElementById('expensesTable').addEventListener('dblclick', (e) => {
+        const td = e.target.closest('td');
+        if (!td) return;
+
+        const tr = td.closest('tr');
+        if (!tr || !tr.dataset.entryId) return;
+
+        const entryId = tr.dataset.entryId;
+        const entry = entries.find(en => en.id === entryId);
+        if (!entry) return;
+
+        // Determinar qué campo se hizo doble clic
+        const cellIndex = Array.from(tr.children).indexOf(td);
+        // Índices: 0=fecha, 1=tipo, 2=categoría, 3=descripción, 4=monto, 5=acción
+        const fieldMap = { 0: 'fecha', 3: 'descripcion', 4: 'monto' };
+        const field = fieldMap[cellIndex];
+
+        if (field) {
+            startInlineCellEdit(entryId, field);
+        }
+    });
+
+    // Eventos de teclado y blur en inputs inline (delegación en tbody)
+    document.getElementById('expensesTable').addEventListener('keydown', (e) => {
+        const input = e.target.closest('.inline-edit-fecha, .inline-edit-descripcion, .inline-edit-monto');
+        if (!input) return;
+
+        const entryId = input.dataset.entryId;
+
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            saveInlineEdit(entryId);
+        } else if (e.key === 'Escape') {
+            e.preventDefault();
+            cancelInlineEdit();
+        } else if (e.key === 'Tab') {
+            // Tab mueve al siguiente campo editable de la misma fila
+            const field = input.dataset.field;
+            const tr = input.closest('tr');
+            if (!tr) return;
+
+            const nextFieldOrder = ['fecha', 'descripcion', 'monto'];
+            const currentIdx = nextFieldOrder.indexOf(field);
+            const nextIdx = e.shiftKey ? currentIdx - 1 : currentIdx + 1;
+
+            if (nextIdx >= 0 && nextIdx < nextFieldOrder.length) {
+                const nextField = nextFieldOrder[nextIdx];
+                const nextInput = tr.querySelector(`.inline-edit-${nextField}`);
+                if (nextInput) {
+                    e.preventDefault();
+                    nextInput.focus();
+                    nextInput.select();
+                }
+            }
+        }
+    });
+
+    // Guardar al perder foco (blur) en inputs inline
+    document.getElementById('expensesTable').addEventListener('focusout', (e) => {
+        const input = e.target.closest('.inline-edit-fecha, .inline-edit-descripcion, .inline-edit-monto');
+        if (!input) return;
+
+        const entryId = input.dataset.entryId;
+        // Usar setTimeout para permitir que otros eventos (como Enter/Escape) se procesen primero
+        setTimeout(() => {
+            // Solo guardar si seguimos en modo edición inline para esta fila
+            if (inlineEditingId === entryId) {
+                saveInlineEdit(entryId);
+            }
+        }, 150);
     });
 
     // Modo oscuro

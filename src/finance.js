@@ -290,6 +290,33 @@ function generateRecurringEntries(recurring, entries, month) {
     return result;
 }
 
+// --- Inline editing: parseo de datos desde inputs de fila -----------
+
+function parseEntryFromRow(values) {
+    // Extrae y valida los campos editables de una fila de la tabla.
+    // values: { fecha, descripcion, monto }
+    // Devuelve { fecha, descripcion, monto } o array de errores.
+    const errors = [];
+    const fecha = (values.fecha || '').trim();
+    const descripcion = (values.descripcion || '').trim();
+    const monto = values.monto;
+
+    if (!fecha || !/^\d{4}-\d{2}-\d{2}$/.test(fecha) || isNaN(Date.parse(fecha))) {
+        errors.push('Fecha no válida.');
+    }
+    if (monto === undefined || monto === null || monto === '' || Number(monto) <= 0 || !isFinite(Number(monto))) {
+        errors.push('El monto tiene que ser mayor a 0.');
+    }
+    if (!descripcion) {
+        errors.push('La descripción no puede estar vacía.');
+    }
+
+    if (errors.length > 0) {
+        return { errors };
+    }
+    return { fecha, descripcion, monto: Number(monto) };
+}
+
 // --- Exports para vitest / Node.js --------------------------------
 
 if (typeof module !== 'undefined' && module.exports) {
@@ -311,7 +338,8 @@ if (typeof module !== 'undefined' && module.exports) {
         calculateComparison,
         calculateBudgetProgress,
         calculateMonthlyTrend,
-        generateRecurringEntries
+        generateRecurringEntries,
+        parseEntryFromRow
     };
 }
 
@@ -336,4 +364,5 @@ if (typeof window !== 'undefined') {
     window.calculateBudgetProgress = calculateBudgetProgress;
     window.calculateMonthlyTrend = calculateMonthlyTrend;
     window.generateRecurringEntries = generateRecurringEntries;
+    window.parseEntryFromRow = parseEntryFromRow;
 }

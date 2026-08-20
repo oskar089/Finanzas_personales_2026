@@ -640,3 +640,116 @@ describe('generateRecurringEntries()', () => {
         expect(result).toHaveLength(0);
     });
 });
+
+// -------------------------------------------------------------------
+// parseEntryFromRow()
+// -------------------------------------------------------------------
+describe('parseEntryFromRow()', () => {
+    it('devuelve campos parseados para entrada válida', () => {
+        const result = finance.parseEntryFromRow({
+            fecha: '2026-08-15',
+            descripcion: 'Compra test',
+            monto: '150.50'
+        });
+        expect(result.errors).toBeUndefined();
+        expect(result.fecha).toBe('2026-08-15');
+        expect(result.descripcion).toBe('Compra test');
+        expect(result.monto).toBe(150.5);
+    });
+
+    it('trimea espacios en descripción y fecha', () => {
+        const result = finance.parseEntryFromRow({
+            fecha: '  2026-08-15  ',
+            descripcion: '  Compra test  ',
+            monto: '100'
+        });
+        expect(result.errors).toBeUndefined();
+        expect(result.fecha).toBe('2026-08-15');
+        expect(result.descripcion).toBe('Compra test');
+    });
+
+    it('devuelve error si fecha es inválida', () => {
+        const result = finance.parseEntryFromRow({
+            fecha: 'no-es-fecha',
+            descripcion: 'Test',
+            monto: '100'
+        });
+        expect(result.errors).toBeDefined();
+        expect(result.errors.some(e => /fecha/i.test(e))).toBe(true);
+    });
+
+    it('devuelve error si fecha está vacía', () => {
+        const result = finance.parseEntryFromRow({
+            fecha: '',
+            descripcion: 'Test',
+            monto: '100'
+        });
+        expect(result.errors).toBeDefined();
+    });
+
+    it('devuelve error si monto es cero', () => {
+        const result = finance.parseEntryFromRow({
+            fecha: '2026-08-15',
+            descripcion: 'Test',
+            monto: '0'
+        });
+        expect(result.errors).toBeDefined();
+        expect(result.errors.some(e => /monto/i.test(e))).toBe(true);
+    });
+
+    it('devuelve error si monto es negativo', () => {
+        const result = finance.parseEntryFromRow({
+            fecha: '2026-08-15',
+            descripcion: 'Test',
+            monto: '-50'
+        });
+        expect(result.errors).toBeDefined();
+    });
+
+    it('devuelve error si monto es Infinity', () => {
+        const result = finance.parseEntryFromRow({
+            fecha: '2026-08-15',
+            descripcion: 'Test',
+            monto: 'Infinity'
+        });
+        expect(result.errors).toBeDefined();
+    });
+
+    it('devuelve error si monto está vacío', () => {
+        const result = finance.parseEntryFromRow({
+            fecha: '2026-08-15',
+            descripcion: 'Test',
+            monto: ''
+        });
+        expect(result.errors).toBeDefined();
+    });
+
+    it('devuelve error si descripción está vacía', () => {
+        const result = finance.parseEntryFromRow({
+            fecha: '2026-08-15',
+            descripcion: '',
+            monto: '100'
+        });
+        expect(result.errors).toBeDefined();
+        expect(result.errors.some(e => /descripci/i.test(e))).toBe(true);
+    });
+
+    it('devuelve error si descripción es solo espacios', () => {
+        const result = finance.parseEntryFromRow({
+            fecha: '2026-08-15',
+            descripcion: '   ',
+            monto: '100'
+        });
+        expect(result.errors).toBeDefined();
+    });
+
+    it('maneja monto como número directo', () => {
+        const result = finance.parseEntryFromRow({
+            fecha: '2026-08-15',
+            descripcion: 'Test',
+            monto: 200
+        });
+        expect(result.errors).toBeUndefined();
+        expect(result.monto).toBe(200);
+    });
+});
