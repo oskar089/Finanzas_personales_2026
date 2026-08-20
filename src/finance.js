@@ -73,10 +73,13 @@ function calculateBalance(entries) {
         .filter(e => e.tipo === 'income')
         .reduce((acc, e) => acc + e.monto, 0);
     const totalExpenses = entries
-        .filter(e => e.tipo !== 'income')
+        .filter(e => e.tipo === 'expense')
         .reduce((acc, e) => acc + e.monto, 0);
-    const balance = totalIncome - totalExpenses;
-    return { totalIncome, totalExpenses, balance };
+    const totalSavings = entries
+        .filter(e => e.tipo === 'savings')
+        .reduce((acc, e) => acc + e.monto, 0);
+    const balance = totalIncome - totalExpenses - totalSavings;
+    return { totalIncome, totalExpenses, totalSavings, balance };
 }
 
 function filterEntries(entries, { type, category, month, search } = {}) {
@@ -94,16 +97,14 @@ function filterEntries(entries, { type, category, month, search } = {}) {
 
 function validateEntry({ tipo, amount, category, description } = {}) {
     const errors = [];
-    if (!tipo || (tipo !== 'expense' && tipo !== 'income')) {
+    if (!tipo || (tipo !== 'expense' && tipo !== 'income' && tipo !== 'savings')) {
         errors.push('Seleccioná un tipo válido.');
     }
     if (amount === undefined || amount === null || amount === '' || Number(amount) <= 0) {
         errors.push('El monto tiene que ser mayor a 0.');
     }
     if (!category || !category.trim()) {
-        errors.push('Seleccioná una categoría.');
-    } else if (!getAllCategories().includes(category.trim())) {
-        errors.push('Categoría no válida.');
+        errors.push('Ingresá una categoría.');
     }
     if (!description || !description.trim()) {
         errors.push('Agregá una descripción.');
@@ -294,15 +295,24 @@ function generateRecurringEntries(recurring, entries, month) {
 
 function parseEntryFromRow(values) {
     // Extrae y valida los campos editables de una fila de la tabla.
-    // values: { fecha, descripcion, monto }
-    // Devuelve { fecha, descripcion, monto } o array de errores.
+    // values: { fecha, tipo, categoria, subcategoria, descripcion, monto }
+    // Devuelve los campos procesados o array de errores.
     const errors = [];
     const fecha = (values.fecha || '').trim();
+    const tipo = (values.tipo || '').trim();
+    const categoria = (values.categoria || '').trim();
+    const subcategoria = (values.subcategoria || '').trim();
     const descripcion = (values.descripcion || '').trim();
     const monto = values.monto;
 
     if (!fecha || !/^\d{4}-\d{2}-\d{2}$/.test(fecha) || isNaN(Date.parse(fecha))) {
         errors.push('Fecha no válida.');
+    }
+    if (!tipo || (tipo !== 'expense' && tipo !== 'income' && tipo !== 'savings')) {
+        errors.push('Tipo no válido.');
+    }
+    if (!categoria) {
+        errors.push('La categoría no puede estar vacía.');
     }
     if (monto === undefined || monto === null || monto === '' || Number(monto) <= 0 || !isFinite(Number(monto))) {
         errors.push('El monto tiene que ser mayor a 0.');
@@ -314,7 +324,7 @@ function parseEntryFromRow(values) {
     if (errors.length > 0) {
         return { errors };
     }
-    return { fecha, descripcion, monto: Number(monto) };
+    return { fecha, tipo, categoria, subcategoria, descripcion, monto: Number(monto) };
 }
 
 // --- Exports para vitest / Node.js --------------------------------

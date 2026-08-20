@@ -35,9 +35,11 @@
                         <label class="form-label">Tipo</label>
                         <div class="btn-group w-100" role="group">
                             <input type="radio" class="btn-check" name="tipo" id="tipoExpense" value="expense" checked>
-                            <label class="btn btn-outline-danger btn-sm" for="tipoExpense">💸 Gasto</label>
+                            <label class="btn btn-outline-danger btn-sm" for="tipoExpense">💸</label>
                             <input type="radio" class="btn-check" name="tipo" id="tipoIncome" value="income">
-                            <label class="btn btn-outline-success btn-sm" for="tipoIncome">💰 Ingreso</label>
+                            <label class="btn btn-outline-success btn-sm" for="tipoIncome">💰</label>
+                            <input type="radio" class="btn-check" name="tipo" id="tipoAhorro" value="savings">
+                            <label class="btn btn-outline-warning btn-sm" for="tipoAhorro">🏦</label>
                         </div>
                     </div>
                     <div class="col-md-2">
@@ -46,11 +48,19 @@
                     </div>
                     <div class="col-md-2">
                         <label for="category" class="form-label">Categoría</label>
-                        <select id="category" class="form-select" required>
+                        <input type="text" class="form-control" id="category" list="categoryList" placeholder="Ej: Comida" required>
+                        <datalist id="categoryList">
                             <!-- Se llena desde JS -->
-                        </select>
+                        </datalist>
                     </div>
-                    <div class="col-md-3">
+                    <div class="col-md-2">
+                        <label for="subcategory" class="form-label">Subcategoría</label>
+                        <input type="text" class="form-control" id="subcategory" list="subcategoryList" placeholder="Ej: Seguro">
+                        <datalist id="subcategoryList">
+                            <!-- Se llena desde JS -->
+                        </datalist>
+                    </div>
+                    <div class="col-md-2">
                         <label for="description" class="form-label">Descripción</label>
                         <div class="input-group">
                             <input type="text" class="form-control" id="description" maxlength="100" placeholder="Ej: café con medialunas">
@@ -111,7 +121,7 @@
 
         <!-- Resumen -->
         <section class="row g-3 mb-4" id="resumen">
-            <div class="col-md-4">
+            <div class="col-md-3">
                 <div class="card text-bg-success shadow-sm">
                     <div class="card-body">
                         <h3 class="h6">💰 Ingresos</h3>
@@ -119,7 +129,7 @@
                     </div>
                 </div>
             </div>
-            <div class="col-md-4">
+            <div class="col-md-3">
                 <div class="card text-bg-danger shadow-sm">
                     <div class="card-body">
                         <h3 class="h6">💸 Gastos</h3>
@@ -127,7 +137,15 @@
                     </div>
                 </div>
             </div>
-            <div class="col-md-4">
+            <div class="col-md-3">
+                <div class="card text-bg-warning shadow-sm">
+                    <div class="card-body">
+                        <h3 class="h6">🏦 Ahorros</h3>
+                        <p class="display-6 mb-0" id="totalSavings">€0</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
                 <div class="card text-bg-primary shadow-sm">
                     <div class="card-body">
                         <h3 class="h6">⚖️ Balance</h3>
@@ -169,6 +187,32 @@
                         <h3 class="h6 text-muted">⏳ Días restantes</h3>
                         <p class="h4 mb-0" id="dashDaysLeft">—</p>
                     </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Recomendaciones financieras -->
+        <section class="card shadow-sm mb-4" id="recommendationsSection">
+            <div class="card-body">
+                <h2 class="h5 card-title mb-3">💡 Recomendaciones</h2>
+                <div id="recommendationsEmpty">
+                    <p class="text-muted mb-3">Obténé consejos personalizados analizando tus datos financieros con IA local.</p>
+                    <button type="button" class="btn btn-outline-primary" id="btnAnalyzeFinance">🧠 Analizar mis finanzas</button>
+                </div>
+                <div id="recommendationsLoading" class="d-none">
+                    <div class="d-flex align-items-center gap-2">
+                        <div class="spinner-border spinner-border-sm text-primary" role="status">
+                            <span class="visually-hidden">Analizando...</span>
+                        </div>
+                        <span class="text-muted">Analizando tus finanzas con Gemma 4...</span>
+                    </div>
+                </div>
+                <div id="recommendationsNoData" class="d-none">
+                    <p class="text-muted my-3">Cargá algunos movimientos primero para obtener recomendaciones.</p>
+                </div>
+                <div id="recommendationsResult" class="d-none">
+                    <ol id="recommendationsList" class="mb-3"></ol>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" id="btnReAnalyze">🔄 Analizar de nuevo</button>
                 </div>
             </div>
         </section>
@@ -319,6 +363,8 @@
         </div>
     </div>
 
+    <!-- Bootstrap 5.3 JS bundle (popper included) -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js" integrity="sha384-C6RzsynM9kWDrMNeT87bh95OGNyZPhcTNXj1NW7RuBCsyN/o0jlpcV8Qyq46cDfL" crossorigin="anonymous"></script>
     <script src="src/finance.js"></script>
     <script src="src/storage.js"></script>
     <script src="src/toast.js"></script>

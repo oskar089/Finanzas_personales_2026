@@ -172,7 +172,7 @@ describe('calculateBalance()', () => {
 
     it('array vacio devuelve ceros', () => {
         const result = finance.calculateBalance([]);
-        expect(result).toEqual({ totalIncome: 0, totalExpenses: 0, balance: 0 });
+        expect(result).toEqual({ totalIncome: 0, totalExpenses: 0, totalSavings: 0, balance: 0 });
     });
 });
 
@@ -313,10 +313,9 @@ describe('validateEntry()', () => {
         expect(errors[0]).toMatch(/descripci/i);
     });
 
-    it('categoria no valida agrega error', () => {
+    it('categoria personalizada es valida', () => {
         const errors = finance.validateEntry({ ...validEntry, category: 'CategoriaFalsa' });
-        expect(errors.length).toBeGreaterThanOrEqual(1);
-        expect(errors[0]).toMatch(/categor/i);
+        expect(errors).toHaveLength(0);
     });
 
     it('entry undefined no explota', () => {
@@ -648,11 +647,15 @@ describe('parseEntryFromRow()', () => {
     it('devuelve campos parseados para entrada válida', () => {
         const result = finance.parseEntryFromRow({
             fecha: '2026-08-15',
+            tipo: 'expense',
+            categoria: 'Comida',
             descripcion: 'Compra test',
             monto: '150.50'
         });
         expect(result.errors).toBeUndefined();
         expect(result.fecha).toBe('2026-08-15');
+        expect(result.tipo).toBe('expense');
+        expect(result.categoria).toBe('Comida');
         expect(result.descripcion).toBe('Compra test');
         expect(result.monto).toBe(150.5);
     });
@@ -660,6 +663,8 @@ describe('parseEntryFromRow()', () => {
     it('trimea espacios en descripción y fecha', () => {
         const result = finance.parseEntryFromRow({
             fecha: '  2026-08-15  ',
+            tipo: 'income',
+            categoria: 'Sueldo',
             descripcion: '  Compra test  ',
             monto: '100'
         });
@@ -746,6 +751,8 @@ describe('parseEntryFromRow()', () => {
     it('maneja monto como número directo', () => {
         const result = finance.parseEntryFromRow({
             fecha: '2026-08-15',
+            tipo: 'savings',
+            categoria: 'Ahorro',
             descripcion: 'Test',
             monto: 200
         });

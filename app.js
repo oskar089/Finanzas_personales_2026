@@ -13,6 +13,8 @@
 
 const STORAGE_KEY = 'finanzas:gastos:v1';
 const DARK_MODE_KEY = 'finanzas:dark-mode';
+const OLLAMA_URL = 'http://localhost:11434/api/generate';
+const OLLAMA_MODEL = 'gemma4';
 
 // --- Estado -------------------------------------------------------
 
@@ -57,18 +59,22 @@ async function autoCategorize() {
     const categories = getAllCategories().map(c => `"${c}"`).join(', ');
 
     try {
-        const res = await fetch('http://localhost:11434/api/generate', {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 30000);
+        const res = await fetch(OLLAMA_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                model: 'gemma4',
+                model: OLLAMA_MODEL,
                 prompt: `Sos un asistente financiero. Clasificá este gasto o ingreso en UNA de estas categorías: ${categories}.
 Descripción: "${desc}"
 Respondé SOLO con el nombre exacto de la categoría, sin puntos ni explicaciones.`,
                 stream: false,
                 options: { temperature: 0.1, max_tokens: 20 }
-            })
+            }),
+            signal: controller.signal
         });
+        clearTimeout(timeoutId);
 
         if (!res.ok) throw new Error(`Ollama respondió ${res.status}`);
 
@@ -98,7 +104,10 @@ Respondé SOLO con el nombre exacto de la categoría, sin puntos ni explicacione
         }
     } catch (err) {
         console.error('Error con Ollama:', err);
-        toast.showError('No se pudo conectar con Gemma 4. ¿Está corriendo Ollama? (ollama serve)');
+        const msg = err.name === 'AbortError'
+            ? 'Ollama tardó demasiado (30s). Verificá que esté corriendo: ollama serve'
+            : 'No se pudo conectar con Gemma 4. ¿Está corriendo Ollama? (ollama serve)';
+        toast.showError(msg);
     } finally {
         btn.disabled = false;
         btn.textContent = '🧠 Auto';
@@ -107,12 +116,13 @@ Respondé SOLO con el nombre exacto de la categoría, sin puntos ni explicacione
 
 // --- CRUD ---------------------------------------------------------
 
-async function addEntry({ tipo, amount, category, description, date }) {
+async function addEntry({ tipo, amount, category, subcategory, description, date }) {
     const newEntry = {
         id: generateId(),
         tipo,
         monto: Number(amount),
         categoria: category,
+        subcategoria: subcategory || '',
         descripcion: description.trim(),
         fecha: date
     };
@@ -121,10 +131,10 @@ async function addEntry({ tipo, amount, category, description, date }) {
     render();
 }
 
-async function updateEntry({ id, tipo, amount, category, description, date }) {
+async function updateEntry({ id, tipo, amount, category, subcategory, description, date }) {
     entries = entries.map(e =>
         e.id === id
-            ? { ...e, tipo, monto: Number(amount), categoria: category, descripcion: description.trim(), fecha: date }
+            ? { ...e, tipo, monto: Number(amount), categoria: category, subcategoria: subcategory || '', descripcion: description.trim(), fecha: date }
             : e
     );
     await saveToStorage();
@@ -152,11 +162,11 @@ function getFilteredEntries() {
 // --- Render: Formulario -------------------------------------------
 
 function renderCategories() {
-    const select = document.getElementById('category');
+    const datalist = document.getElementById('categoryList');
     const filterSelect = document.getElementById('filterCategory');
     const cats = getAllCategories();
     const options = cats.map(c => `<option value="${escapeHTML(c)}">${escapeHTML(c)}</option>`).join('');
-    select.innerHTML = options;
+    datalist.innerHTML = options;
     // El filtro de categoría arranca con la opción "Todas"
     filterSelect.innerHTML = '<option value="">Todas</option>' + options;
 }
@@ -168,11 +178,18 @@ function enterEditMode(entry) {
     document.getElementById('btnCancelEdit').classList.remove('d-none');
 
     // Setear tipo radio
-    document.getElementById(entry.tipo === 'income' ? 'tipoIncome' : 'tipoExpense').checked = true;
+    if (entry.tipo === 'income') {
+        document.getElementById('tipoIncome').checked = true;
+    } else if (entry.tipo === 'savings') {
+        document.getElementById('tipoAhorro').checked = true;
+    } else {
+        document.getElementById('tipoExpense').checked = true;
+    }
 
     // Setear valores
     document.getElementById('amount').value = entry.monto;
     document.getElementById('category').value = entry.categoria;
+    document.getElementById('subcategory').value = entry.subcategoria || '';
     document.getElementById('description').value = entry.descripcion;
     document.getElementById('date').value = entry.fecha;
 
@@ -209,11 +226,17 @@ async function saveInlineEdit(entryId) {
 
     // Extraer valores de los inputs de la fila
     const fechaInput = row.querySelector('.inline-edit-fecha');
+    const tipoInput = row.querySelector('.inline-edit-tipo');
+    const catInput = row.querySelector('.inline-edit-categoria');
+    const subInput = row.querySelector('.inline-edit-subcategoria');
     const descInput = row.querySelector('.inline-edit-descripcion');
     const montoInput = row.querySelector('.inline-edit-monto');
 
     const values = {
         fecha: fechaInput ? fechaInput.value : entry.fecha,
+        tipo: tipoInput ? tipoInput.value : entry.tipo,
+        categoria: catInput ? catInput.value : entry.categoria,
+        subcategoria: subInput ? subInput.value : entry.subcategoria,
         descripcion: descInput ? descInput.value : entry.descripcion,
         monto: montoInput ? montoInput.value : entry.monto
     };
@@ -228,7 +251,7 @@ async function saveInlineEdit(entryId) {
     // Actualizar entry de forma inmutable
     entries = entries.map(e =>
         e.id === entryId
-            ? { ...e, fecha: result.fecha, descripcion: result.descripcion, monto: result.monto }
+            ? { ...e, fecha: result.fecha, tipo: result.tipo, categoria: result.categoria, subcategoria: result.subcategoria, descripcion: result.descripcion, monto: result.monto }
             : e
     );
 
@@ -241,11 +264,32 @@ async function saveInlineEdit(entryId) {
 
 // Genera el HTML para una celda editable (input inline)
 function renderEditableCell(entry, field, value) {
+    const inputClass = 'form-control form-control-sm';
+
+    if (field === 'tipo') {
+        const options = [
+            { val: 'expense', label: '💸 Gasto', sel: entry.tipo === 'expense' ? ' selected' : '' },
+            { val: 'income', label: '💰 Ingreso', sel: entry.tipo === 'income' ? ' selected' : '' },
+            { val: 'savings', label: '🏦 Ahorro', sel: entry.tipo === 'savings' ? ' selected' : '' }
+        ];
+        const opts = options.map(o => `<option value="${o.val}"${o.sel}>${o.label}</option>`).join('');
+        return `<select class="${inputClass} inline-edit-${field}" data-field="${field}" data-entry-id="${entry.id}">${opts}</select>`;
+    }
+
+    if (field === 'categoria') {
+        const cats = getAllCategories().map(c => `<option value="${escapeHTML(c)}">`).join('');
+        return `<input type="text" class="${inputClass} inline-edit-${field}" value="${escapeHTML(value || '')}" list="inlineCatList-${entry.id}" data-field="${field}" data-entry-id="${entry.id}"><datalist id="inlineCatList-${entry.id}">${cats}</datalist>`;
+    }
+
+    if (field === 'subcategoria') {
+        return `<input type="text" class="${inputClass} inline-edit-${field}" value="${escapeHTML(value || '')}" data-field="${field}" data-entry-id="${entry.id}">`;
+    }
+
     const inputType = field === 'fecha' ? 'date' : field === 'monto' ? 'number' : 'text';
     const stepAttr = field === 'monto' ? ' step="0.01" min="0"' : '';
     const maxlengthAttr = field === 'descripcion' ? ' maxlength="100"' : '';
-    const inputClass = field === 'monto' ? 'form-control form-control-sm text-end' : 'form-control form-control-sm';
-    return `<input type="${inputType}" class="${inputClass} inline-edit-${field}" value="${field === 'monto' ? entry.monto : escapeHTML(value || '')}"${stepAttr}${maxlengthAttr} data-field="${field}" data-entry-id="${entry.id}">`;
+    const inputTypeClass = field === 'monto' ? 'form-control form-control-sm text-end' : inputClass;
+    return `<input type="${inputType}" class="${inputTypeClass} inline-edit-${field}" value="${field === 'monto' ? entry.monto : escapeHTML(value || '')}"${stepAttr}${maxlengthAttr} data-field="${field}" data-entry-id="${entry.id}">`;
 }
 
 // Inicia edición inline de una celda individual
@@ -296,8 +340,8 @@ function renderTable() {
 
     tbody.innerHTML = sorted.map(e => {
         const isIncome = e.tipo === 'income';
-        const badgeClass = isIncome ? 'bg-success' : 'bg-danger';
-        const badgeText = isIncome ? '💰 Ingreso' : '💸 Gasto';
+        const badgeClass = isIncome ? 'bg-success' : e.tipo === 'savings' ? 'bg-warning text-dark' : 'bg-danger';
+        const badgeText = isIncome ? '💰 Ingreso' : e.tipo === 'savings' ? '🏦 Ahorro' : '💸 Gasto';
         const montoClass = isIncome ? 'text-success fw-bold' : 'monto';
 
         // Determinar si esta fila está en modo edición inline
@@ -315,10 +359,28 @@ function renderTable() {
             catBadge = `<span class="badge ${badgeCls}" title="${bp.porcentaje}% usado">${escapeHTML(e.categoria)}</span>`;
         }
 
+        // Subcategoría badge
+        const subBadge = e.subcategoria ? `<span class="badge bg-info text-dark ms-1">${escapeHTML(e.subcategoria)}</span>` : '';
+
         // Celda de fecha: editable si edición inline activa
         const fechaCell = isRowEdit || (isSingleField && inlineEditField === 'fecha')
             ? renderEditableCell(e, 'fecha', e.fecha)
             : escapeHTML(e.fecha);
+
+        // Celda de tipo: editable si edición inline activa
+        const tipoCell = isRowEdit || (isSingleField && inlineEditField === 'tipo')
+            ? renderEditableCell(e, 'tipo', e.tipo)
+            : `<span class="badge ${badgeClass}">${badgeText}</span>`;
+
+        // Celda de categoría: editable si edición inline activa
+        const catCell = isRowEdit || (isSingleField && inlineEditField === 'categoria')
+            ? renderEditableCell(e, 'categoria', e.categoria)
+            : `${catBadge}${subBadge}`;
+
+        // Celda de subcategoría: editable solo en edición de fila completa
+        const subCell = isRowEdit
+            ? renderEditableCell(e, 'subcategoria', e.subcategoria)
+            : '';
 
         // Celda de descripción: editable si edición inline activa
         const descCell = isRowEdit || (isSingleField && inlineEditField === 'descripcion')
@@ -336,8 +398,8 @@ function renderTable() {
         return `
         <tr data-entry-id="${escapeHTML(e.id)}">
             <td class="${isInlineEditing ? 'inline-editing' : ''}">${fechaCell}</td>
-            <td><span class="badge ${badgeClass}">${badgeText}</span></td>
-            <td>${catBadge}</td>
+            <td>${tipoCell}</td>
+            <td>${catCell}${subCell ? ' ' + subCell : ''}</td>
             <td>${descCell}</td>
             <td class="text-end ${montoClass}${editCls}">${montoCell}</td>
             <td class="text-end">
@@ -356,10 +418,11 @@ function renderTable() {
 
 function renderSummary() {
     const filtered = getFilteredEntries();
-    const { totalIncome, totalExpenses, balance } = calculateBalance(filtered);
+    const { totalIncome, totalExpenses, totalSavings, balance } = calculateBalance(filtered);
 
     document.getElementById('totalIncome').textContent = formatAmount(totalIncome);
     document.getElementById('totalExpenses').textContent = formatAmount(totalExpenses);
+    document.getElementById('totalSavings').textContent = formatAmount(totalSavings);
 
     const balanceEl = document.getElementById('totalBalance');
     balanceEl.textContent = formatAmount(Math.abs(balance));
@@ -496,6 +559,141 @@ function renderDashboard() {
     }
 
     document.getElementById('dashDaysLeft').textContent = daysLeft;
+}
+
+// --- Recomendaciones financieras (IA local) --------------------------
+
+async function renderRecommendations() {
+    const emptyEl = document.getElementById('recommendationsEmpty');
+    const loadingEl = document.getElementById('recommendationsLoading');
+    const noDataEl = document.getElementById('recommendationsNoData');
+    const resultEl = document.getElementById('recommendationsResult');
+    const listEl = document.getElementById('recommendationsList');
+    const btn = document.getElementById('btnAnalyzeFinance');
+    const btnRe = document.getElementById('btnReAnalyze');
+
+    // Verificar si hay datos
+    if (entries.length === 0) {
+        emptyEl.classList.add('d-none');
+        loadingEl.classList.add('d-none');
+        noDataEl.classList.remove('d-none');
+        resultEl.classList.add('d-none');
+        return;
+    }
+
+    // Mostrar loading, ocultar otros
+    emptyEl.classList.add('d-none');
+    noDataEl.classList.add('d-none');
+    resultEl.classList.add('d-none');
+    loadingEl.classList.remove('d-none');
+    btn.disabled = true;
+
+    // Calcular datos financieros del mes actual
+    const now = new Date();
+    const currentMonth = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
+
+    const monthEntries = entries.filter(e => e.fecha.startsWith(currentMonth));
+    const { totalIncome, totalExpenses, balance } = calculateBalance(monthEntries);
+    const dailyAvg = calculateDailyAverage(entries, currentMonth);
+    const comparison = calculateComparison(entries, currentMonth);
+    const budgetProgress = calculateBudgetProgress(entries, budgets, currentMonth);
+
+    // Top 5 categorías de gasto
+    const expensesByCategory = monthEntries
+        .filter(e => e.tipo !== 'income')
+        .reduce((acc, e) => {
+            acc[e.categoria] = (acc[e.categoria] || 0) + e.monto;
+            return acc;
+        }, {});
+    const topCategories = Object.entries(expensesByCategory)
+        .sort(([, a], [, b]) => b - a)
+        .slice(0, 5)
+        .map(([cat, amount]) => `${cat}: ${formatAmount(amount)}`)
+        .join(', ') || 'Sin datos';
+
+    // Estado de presupuestos
+    const budgetStatus = budgetProgress.length > 0
+        ? budgetProgress.map(p => {
+            const icon = p.estado === 'excedido' ? '❌' : p.estado === 'advertencia' ? '⚠️' : '✅';
+            return `${p.categoria}: ${p.porcentaje}% (${icon} ${p.estado})`;
+        }).join(', ')
+        : 'Sin presupuestos configurados';
+
+    // Comparativa mes anterior
+    const comparisonText = comparison.prevExpenses > 0
+        ? `Gastos actuales: ${formatAmount(comparison.currentExpenses)}, mes anterior: ${formatAmount(comparison.prevExpenses)} (${comparison.delta >= 0 ? '+' : ''}${comparison.percent.toFixed(1)}%)`
+        : 'Sin datos del mes anterior';
+
+    // Construir prompt
+    const prompt = `Sos un asistente financiero personal. Analizá estos datos y dale 3-5 consejos concretos y accionables para mejorar las finanzas del usuario. Sé directo, usa números reales, y priorizá el consejo más impactante primero.
+
+Datos del mes:
+- Ingresos: ${formatAmount(totalIncome)}
+- Gastos: ${formatAmount(totalExpenses)}
+- Balance: ${formatAmount(balance)}
+- Promedio diario: ${formatAmount(dailyAvg)}
+- Top categorías: ${topCategories}
+- Presupuestos: ${budgetStatus}
+- ${comparisonText}
+
+Respondé en español, formato:
+1. [Consejo concreto con número]
+2. [Consejo concreto con número]
+...`;
+
+    try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 60000);
+        const res = await fetch(OLLAMA_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                model: OLLAMA_MODEL,
+                prompt,
+                stream: false,
+                options: { temperature: 0.3, max_tokens: 500 }
+            }),
+            signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+
+        if (!res.ok) throw new Error(`Ollama respondió ${res.status}`);
+
+        const data = await res.json();
+        const response = data.response.trim();
+
+        // Parsear consejos numerados (1. ... 2. ... etc.)
+        const recommendations = response
+            .split(/\n/)
+            .map(line => line.replace(/^\d+[\.\)]\s*/, '').trim())
+            .filter(line => line.length > 0);
+
+        if (recommendations.length === 0) {
+            toast.showWarning('Gemma 4 no devolvió recomendaciones. Intentá de nuevo.');
+            loadingEl.classList.add('d-none');
+            emptyEl.classList.remove('d-none');
+            return;
+        }
+
+        // Renderizar recomendaciones
+        listEl.innerHTML = recommendations
+            .map(rec => `<li class="mb-2">${escapeHTML(rec)}</li>`)
+            .join('');
+
+        loadingEl.classList.add('d-none');
+        resultEl.classList.remove('d-none');
+        toast.showSuccess('Recomendaciones generadas correctamente.');
+    } catch (err) {
+        console.error('Error con Ollama:', err);
+        const msg = err.name === 'AbortError'
+            ? 'Ollama tardó demasiado (60s). Verificá que esté corriendo: ollama serve'
+            : 'No se pudo conectar con Gemma 4. ¿Está corriendo Ollama? (ollama serve)';
+        toast.showError(msg);
+        loadingEl.classList.add('d-none');
+        emptyEl.classList.remove('d-none');
+    } finally {
+        btn.disabled = false;
+    }
 }
 
 // --- Render: Gráfico de tendencia -----------------------------------
@@ -686,10 +884,6 @@ async function checkAndGenerateRecurring() {
 
     for (const entry of toCreate) {
         await addEntry(entry);
-    }
-
-    if (toCreate.length > 0) {
-        console.log(`Generados ${toCreate.length} movimientos recurrentes para ${currentMonth}`);
     }
 }
 
@@ -1023,6 +1217,7 @@ async function init() {
         const tipo = document.querySelector('input[name="tipo"]:checked').value;
         const amount = document.getElementById('amount').value;
         const category = document.getElementById('category').value;
+        const subcategory = document.getElementById('subcategory').value;
         const description = document.getElementById('description').value;
         const date = document.getElementById('date').value;
 
@@ -1033,10 +1228,10 @@ async function init() {
         }
 
         if (editingId) {
-            updateEntry({ id: editingId, tipo, amount, category, description, date });
+            updateEntry({ id: editingId, tipo, amount, category, subcategory, description, date });
             cancelEdit();
         } else {
-            addEntry({ tipo, amount, category, description, date });
+            addEntry({ tipo, amount, category, subcategory, description, date });
         }
 
         e.target.reset();
@@ -1049,6 +1244,10 @@ async function init() {
 
     // Auto-categorizar con IA
     document.getElementById('btnAutoCat').addEventListener('click', autoCategorize);
+
+    // Recomendaciones financieras
+    document.getElementById('btnAnalyzeFinance').addEventListener('click', renderRecommendations);
+    document.getElementById('btnReAnalyze').addEventListener('click', renderRecommendations);
 
     // Filtros
     document.getElementById('filterType').addEventListener('change', (e) => {
@@ -1093,7 +1292,7 @@ async function init() {
     document.getElementById('expensesTable').addEventListener('click', (e) => {
         const editBtn = e.target.closest('button[data-action="edit"]');
         const deleteBtn = e.target.closest('button[data-action="delete"]');
-        const inlineInput = e.target.closest('.inline-edit-fecha, .inline-edit-descripcion, .inline-edit-monto');
+        const inlineInput = e.target.closest('.inline-edit-fecha, .inline-edit-tipo, .inline-edit-categoria, .inline-edit-subcategoria, .inline-edit-descripcion, .inline-edit-monto');
 
         if (inlineInput) return; // no procesar clicks en inputs inline
 
@@ -1126,7 +1325,7 @@ async function init() {
         // Determinar qué campo se hizo doble clic
         const cellIndex = Array.from(tr.children).indexOf(td);
         // Índices: 0=fecha, 1=tipo, 2=categoría, 3=descripción, 4=monto, 5=acción
-        const fieldMap = { 0: 'fecha', 3: 'descripcion', 4: 'monto' };
+        const fieldMap = { 0: 'fecha', 1: 'tipo', 2: 'categoria', 3: 'descripcion', 4: 'monto' };
         const field = fieldMap[cellIndex];
 
         if (field) {
@@ -1135,8 +1334,10 @@ async function init() {
     });
 
     // Eventos de teclado y blur en inputs inline (delegación en tbody)
+    const inlineSelector = '.inline-edit-fecha, .inline-edit-tipo, .inline-edit-categoria, .inline-edit-subcategoria, .inline-edit-descripcion, .inline-edit-monto';
+
     document.getElementById('expensesTable').addEventListener('keydown', (e) => {
-        const input = e.target.closest('.inline-edit-fecha, .inline-edit-descripcion, .inline-edit-monto');
+        const input = e.target.closest(inlineSelector);
         if (!input) return;
 
         const entryId = input.dataset.entryId;
@@ -1153,7 +1354,7 @@ async function init() {
             const tr = input.closest('tr');
             if (!tr) return;
 
-            const nextFieldOrder = ['fecha', 'descripcion', 'monto'];
+            const nextFieldOrder = ['fecha', 'tipo', 'categoria', 'subcategoria', 'descripcion', 'monto'];
             const currentIdx = nextFieldOrder.indexOf(field);
             const nextIdx = e.shiftKey ? currentIdx - 1 : currentIdx + 1;
 
@@ -1163,7 +1364,7 @@ async function init() {
                 if (nextInput) {
                     e.preventDefault();
                     nextInput.focus();
-                    nextInput.select();
+                    if (nextInput.select) nextInput.select();
                 }
             }
         }
@@ -1171,17 +1372,27 @@ async function init() {
 
     // Guardar al perder foco (blur) en inputs inline
     document.getElementById('expensesTable').addEventListener('focusout', (e) => {
-        const input = e.target.closest('.inline-edit-fecha, .inline-edit-descripcion, .inline-edit-monto');
+        const input = e.target.closest(inlineSelector);
         if (!input) return;
 
         const entryId = input.dataset.entryId;
-        // Usar setTimeout para permitir que otros eventos (como Enter/Escape) se procesen primero
+        // Usar setTimeout para permitir que otros eventos se procesen y detectar adónde fue el foco
         setTimeout(() => {
+            // Si el foco se movió a otro input inline de la misma fila, no guardar (el usuario está navegando)
+            const tr = document.querySelector(`tr[data-entry-id="${entryId}"]`);
+            if (tr && tr.contains(document.activeElement)) return;
             // Solo guardar si seguimos en modo edición inline para esta fila
             if (inlineEditingId === entryId) {
                 saveInlineEdit(entryId);
             }
         }, 150);
+    });
+
+    // Guardar al cambiar select inline (tipo)
+    document.getElementById('expensesTable').addEventListener('change', (e) => {
+        const input = e.target.closest('.inline-edit-tipo');
+        if (!input) return;
+        saveInlineEdit(input.dataset.entryId);
     });
 
     // Modo oscuro
