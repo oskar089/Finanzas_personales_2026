@@ -685,7 +685,7 @@ async function checkAndGenerateRecurring() {
     const toCreate = generateRecurringEntries(recurring, entries, currentMonth);
 
     for (const entry of toCreate) {
-        addEntry(entry);
+        await addEntry(entry);
     }
 
     if (toCreate.length > 0) {

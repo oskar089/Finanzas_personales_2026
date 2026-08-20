@@ -29,6 +29,10 @@ body {
     max-height: 280px;
 }
 
+#chartTrend {
+    max-height: 350px;
+}
+
 /* Transición suave al cambiar modo oscuro/claro */
 html {
     transition: background-color 0.2s ease;
@@ -36,6 +40,17 @@ html {
 
 html[data-bs-theme="dark"] .card {
     border-color: var(--bs-border-color);
+}
+
+/* Tarjetas de resumen todas iguales */
+#resumen .card {
+    min-height: 120px;
+}
+
+#resumen .card .card-body {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
 }
 
 /* Edición inline en tabla */

@@ -110,7 +110,7 @@
         </section>
 
         <!-- Resumen -->
-        <section class="row g-3 mb-4">
+        <section class="row g-3 mb-4" id="resumen">
             <div class="col-md-4">
                 <div class="card text-bg-success shadow-sm">
                     <div class="card-body">
@@ -170,6 +170,33 @@
                         <p class="h4 mb-0" id="dashDaysLeft">—</p>
                     </div>
                 </div>
+            </div>
+        </section>
+
+        <!-- Lista de movimientos -->
+        <section class="card shadow-sm mb-4">
+            <div class="card-body">
+                <h2 class="h5 card-title mb-3">Movimientos</h2>
+                <div class="table-responsive">
+                    <table class="table table-striped table-hover align-middle">
+                        <thead>
+                            <tr>
+                                <th>Fecha</th>
+                                <th>Tipo</th>
+                                <th>Categoría</th>
+                                <th>Descripción</th>
+                                <th class="text-end">Monto</th>
+                                <th class="text-end">Acción</th>
+                            </tr>
+                        </thead>
+                        <tbody id="expensesTable">
+                            <!-- Se llena desde JS -->
+                        </tbody>
+                    </table>
+                </div>
+                <p id="emptyMessage" class="text-muted text-center my-4 d-none">
+                    No hay movimientos cargados todavía. ¡Empezá por el formulario de arriba! 👆
+                </p>
             </div>
         </section>
 
@@ -236,33 +263,6 @@
                 </div>
                 <p id="chartEmpty" class="text-muted text-center my-4 d-none">
                     No hay datos para mostrar gráficos. Cargá algunos gastos o ingresos primero.
-                </p>
-            </div>
-        </section>
-
-        <!-- Lista de movimientos -->
-        <section class="card shadow-sm">
-            <div class="card-body">
-                <h2 class="h5 card-title mb-3">Movimientos</h2>
-                <div class="table-responsive">
-                    <table class="table table-striped table-hover align-middle">
-                        <thead>
-                            <tr>
-                                <th>Fecha</th>
-                                <th>Tipo</th>
-                                <th>Categoría</th>
-                                <th>Descripción</th>
-                                <th class="text-end">Monto</th>
-                                <th class="text-end">Acción</th>
-                            </tr>
-                        </thead>
-                        <tbody id="expensesTable">
-                            <!-- Se llena desde JS -->
-                        </tbody>
-                    </table>
-                </div>
-                <p id="emptyMessage" class="text-muted text-center my-4 d-none">
-                    No hay movimientos cargados todavía. ¡Empezá por el formulario de arriba! 👆
                 </p>
             </div>
         </section>
