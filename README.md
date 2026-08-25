@@ -1,24 +1,30 @@
-# 💰 Personal Finance 2026
+# Personal Finance 2026
 
 [![Live Demo](https://img.shields.io/badge/Live%20Demo-GitHub%20Pages-222222?style=for-the-badge&logo=github&logoColor=white)](https://oskar089.github.io/Finanzas_personales_2026/)
 
-A simple web app to track personal finances (expenses and income).
+A Progressive Web App to track personal finances (expenses, income and savings) with local AI features.
 
-> **Note on the live demo:** AI auto-categorization (Ollama / Gemma 4) requires Ollama running locally on your machine, so this feature is not available in the deployed version. The rest of the app works normally.
+> **Note on the live demo:** AI features (auto-categorization, financial analysis) require Ollama running locally on your machine, so they are not available in the deployed version. The rest of the app works normally.
 
 ## Features
 
-- Add expenses and income with amount, category, description and date.
-- Edit and delete entries.
+- Add expenses, income and savings with amount, category, subcategory, description and date.
+- Edit and delete entries (inline editing for type, category and subcategory).
 - View the transaction list ordered by date (most recent first).
-- Filter by type, category and/or month.
-- Summary: income, expenses and balance.
-- Category distribution charts (Chart.js).
-- Local AI auto-categorization (Ollama / Gemma 4).
+- Filter by type, category, search text and **month range** (Desde/Hasta).
+- Summary: income, expenses, savings and balance.
+- Category distribution charts with type-aware colors (green for income, red for expenses).
+- Monthly trend chart.
+- Budget management with progress tracking.
+- Recurring entries with automatic generation.
+- Local AI auto-categorization (Ollama).
+- AI financial analysis with recommendations (includes subcategory breakdown).
 - Dark mode.
-- Export to CSV (Excel and Google Sheets compatible, with formula injection protection).
-- Export and import JSON (backup and manual restore).
-- Data stored in the browser (`localStorage`). It never leaves your machine.
+- **Export to Excel (.xlsx)** with formatted columns and totals.
+- **Import from Excel (.xlsx/.xls)** with validation.
+- Data stored in the browser (IndexedDB with localStorage fallback). It never leaves your machine.
+- Service Worker for offline support (network-first for local assets, cache-first for CDN).
+- One-click launcher (`start.bat`) for Windows.
 
 ## Tech Stack
 
@@ -26,20 +32,47 @@ A simple web app to track personal finances (expenses and income).
 - CSS3 + Bootstrap 5.3 (CDN with SRI)
 - Vanilla JavaScript (no frameworks, no build step)
 - Chart.js 4.x (CDN with SRI)
-- Vitest + jsdom for tests
+- SheetJS (xlsx 0.18.5, CDN with SRI) for Excel export/import
+- IndexedDB + localStorage fallback for persistence
+- Ollama (gemma3:4b) for local AI features
+- Vitest + jsdom + fake-indexeddb for tests
 
 ## How to Use
 
-1. Open `index.html` in your browser (double click and you're done).
-2. Start adding entries.
-3. Filter by type, category or month whenever you want.
-4. Export to CSV or JSON when you want a backup.
+### Option 1: One-click (Windows)
 
-### AI auto-categorization (optional)
+Double-click `start.bat`. It will:
+1. Check Node.js and npm
+2. Install dependencies if needed
+3. Start Ollama if not running
+4. Open the app in your browser
 
-- Requires [Ollama](https://ollama.com) running on `localhost:11434` with the `gemma4` model (`ollama pull gemma4`).
-- Due to CORS, auto-categorization works best when serving the app over local HTTP
-  (for example `npx serve .` or `python -m http.server`) instead of opening `index.html` directly.
+### Option 2: Manual
+
+```bash
+npm install
+npx serve .
+```
+
+Then open `http://localhost:3000` in your browser.
+
+### Option 3: Direct
+
+Open `index.html` in your browser (some AI features may not work due to CORS).
+
+## AI Features (optional)
+
+Requires [Ollama](https://ollama.com) running on `localhost:11434`:
+
+```bash
+ollama pull gemma3:4b
+ollama serve
+```
+
+- **Auto-categorize**: Type a description and click the brain icon to auto-detect the category.
+- **Financial analysis**: Click "Analizar" to get AI-powered recommendations based on your spending patterns.
+
+> Performance note: On CPU-only machines (no GPU), responses take 10-20 seconds. The button shows "Pensando..." while waiting.
 
 ## Tests
 
@@ -47,19 +80,22 @@ A simple web app to track personal finances (expenses and income).
 npx vitest run
 ```
 
-Pure functions live in `src/finance.js` and are the test surface (`src/finance.test.js`).
+105 tests covering pure functions in `src/finance.js` and storage logic.
 
 ## Design Decisions
 
-- **Single source of truth**: the `entries` array in memory. `localStorage` syncs on every change. The UI re-renders from the array, not from patches.
-- **Currency**: euro (€) with `es-ES` formatting.
-- **Centralized categories** in `src/finance.js` (`EXPENSE_CATEGORIES` and `INCOME_CATEGORIES`). To add a new one, edit those lists and the `<select>` elements update automatically.
+- **Single source of truth**: the `entries` array in memory. IndexedDB syncs on every change. The UI re-renders from the array, not from patches.
+- **Currency**: euro with `es-ES` formatting.
+- **Centralized categories** in `src/finance.js` (`EXPENSE_CATEGORIES` and `INCOME_CATEGORIES`). Custom categories can be added via the UI.
 - **Versioned storage key** (`finanzas:gastos:v1`). If the structure changes in the future, it can be migrated by reading `v1` and writing `v2` without breaking old data.
-- **CSV with BOM** at the start (`\ufeff`) so Excel recognizes accents and ñ without asking for encoding, and with neutralized fields against formula injection.
-- **CDN with SRI** (`integrity` + `crossorigin`) so the browser verifies Bootstrap and Chart.js were not altered.
+- **Excel with BOM** so Excel recognizes accents and n without asking for encoding, and with neutralized fields against formula injection.
+- **CDN with SRI** (`integrity` + `crossorigin`) so the browser verifies Bootstrap, Chart.js and SheetJS were not altered.
+- **Golden angle color palette** (137.5 degrees) for unlimited distinct chart colors without repetition.
+- **Service Worker**: network-first for local assets (always fresh), cache-first for CDN (fast + offline).
 
 ## Possible Future Improvements
 
-- User-defined categories.
-- Data encryption in localStorage.
+- Data encryption in IndexedDB.
 - Cloud sync (OneDrive / Google Drive via API).
+- Multi-currency support.
+- PWA install prompt.
