@@ -5,7 +5,7 @@
 // Cache-first para CDN (no cambian y tienen SRI).
 // =====================================================================
 
-const CACHE_NAME = 'finanzas-v4';
+const CACHE_NAME = 'finanzas-v5';
 const ASSETS = [
     '/',
     '/index.html',
@@ -13,9 +13,9 @@ const ASSETS = [
     '/app.js',
     '/src/finance.js',
     '/src/storage.js',
+    '/vendor/xlsx.full.min.js',
     'https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css',
-    'https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js',
-    'https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js'
+    'https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js'
 ];
 
 // --- Instalación: pre-cache de assets -------------------------------
@@ -56,7 +56,8 @@ self.addEventListener('fetch', (event) => {
         return;
     }
 
-    // CDN assets: cache-first (ya tienen SRI integrity hashes)
+    // CDN assets (Bootstrap, Chart.js): cache-first
+    // Note: only these have SRI integrity hashes in the script tag
     if (url.origin !== location.origin) {
         event.respondWith(
             caches.match(event.request)
