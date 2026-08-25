@@ -205,17 +205,23 @@ describe('filterEntries()', () => {
         expect(result[0].categoria).toBe('Comida');
     });
 
-    it('filtra por mes', () => {
-        const result = finance.filterEntries(entries, { month: '2026-06' });
+    it('filtra por mes (rango desde-hasta)', () => {
+        const result = finance.filterEntries(entries, { monthFrom: '2026-06', monthTo: '2026-06' });
         expect(result).toHaveLength(2);
-        result.forEach(e => expect(e.fecha.startsWith('2026-06')).toBe(true));
+        result.forEach(e => expect(e.fecha.substring(0, 7)).toBe('2026-06'));
+    });
+
+    it('filtra por rango de meses', () => {
+        const result = finance.filterEntries(entries, { monthFrom: '2026-06', monthTo: '2026-07' });
+        expect(result).toHaveLength(4);
     });
 
     it('combina filtros (type + category + month)', () => {
         const result = finance.filterEntries(entries, {
             type: 'expense',
             category: 'Comida',
-            month: '2026-06'
+            monthFrom: '2026-06',
+            monthTo: '2026-06'
         });
         expect(result).toHaveLength(1);
         expect(result[0]).toEqual(entries[1]);
@@ -758,5 +764,33 @@ describe('parseEntryFromRow()', () => {
         });
         expect(result.errors).toBeUndefined();
         expect(result.monto).toBe(200);
+    });
+});
+
+// -------------------------------------------------------------------
+// mergeCategories()
+// -------------------------------------------------------------------
+describe('mergeCategories()', () => {
+    it('devuelve la base sin cambios cuando no hay categorías personalizadas', () => {
+        const base = ['Comida', 'Transporte'];
+        const result = finance.mergeCategories(base, []);
+        expect(result).toEqual(['Comida', 'Transporte']);
+    });
+
+    it('deduplica sin distinguir mayúsculas conservando el casing de la primera aparición', () => {
+        const result = finance.mergeCategories(['Comida'], ['comida', 'COMIDA']);
+        expect(result).toEqual(['Comida']);
+    });
+
+    it('agrega las personalizadas después de la base conservando su orden de inserción', () => {
+        const base = ['Comida', 'Transporte'];
+        const customs = ['Mascotas', 'Regalos'];
+        const result = finance.mergeCategories(base, customs);
+        expect(result).toEqual(['Comida', 'Transporte', 'Mascotas', 'Regalos']);
+    });
+
+    it('deduplica también entre personalizadas, conservando la primera aparición', () => {
+        const result = finance.mergeCategories(['Comida'], ['Mascotas', 'mascotas']);
+        expect(result).toEqual(['Comida', 'Mascotas']);
     });
 });

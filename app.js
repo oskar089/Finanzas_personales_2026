@@ -11,22 +11,23 @@
 
 // --- Constantes ---------------------------------------------------
 
-const STORAGE_KEY = 'finanzas:gastos:v1';
 const DARK_MODE_KEY = 'finanzas:dark-mode';
 const OLLAMA_URL = 'http://localhost:11434/api/generate';
-const OLLAMA_MODEL = 'gemma4';
+const OLLAMA_MODEL = 'gemma3:4b';
 
 // --- Estado -------------------------------------------------------
 
 let entries = [];           // fuente de verdad en memoria
 let filterType = '';        // '' | 'expense' | 'income'
 let filterCategory = '';    // '' = todas
-let filterMonth = '';       // '' = todos, formato YYYY-MM
+let filterMonthFrom = '';     // '' = sin límite inferior, formato YYYY-MM
+let filterMonthTo = '';       // '' = sin límite superior, formato YYYY-MM
 let filterSearch = '';      // búsqueda en descripción/categoría
 let editingId = null;       // null = nuevo, string = editando
 let inlineEditingId = null; // null = sin edición inline, string = ID de la fila en edición
 let inlineEditField = null; // null = edición de fila completa, string = campo individual
 let searchDebounceTimer = null;
+let customCategories = [];  // [{ nombre, tipo: 'expense'|'income', createdAt }] definidas por el usuario
 
 // --- Persistencia -------------------------------------------------
 
@@ -43,6 +44,137 @@ async function saveToStorage() {
     await storage.save(entries);
 }
 
+// --- Categorías personalizadas ------------------------------------
+
+function getCustomCategoryNames() {
+    return customCategories.map(c => c.nombre);
+}
+
+// Single source for every category surface: defaults + user-defined.
+function getMergedCategories() {
+    return mergeCategories(getAllCategories(), getCustomCategoryNames());
+}
+
+async function loadCustomCategoriesFromStorage() {
+    try {
+        if (storage.loadCustomCategories) {
+            customCategories = await storage.loadCustomCategories();
+        }
+    } catch (err) {
+        console.error('No se pudieron leer las categorias personalizadas.', err);
+        customCategories = [];
+    }
+}
+
+async function persistCustomCategories() {
+    if (storage.saveCustomCategories) {
+        await storage.saveCustomCategories(customCategories);
+    }
+}
+
+// --- Modal gestionar categorías ------------------------------------
+
+function renderCustomCategoryGroup(tipo) {
+    const items = customCategories.filter(c => c.tipo === tipo);
+    if (items.length === 0) {
+        return '<p class="text-muted small mb-2">Sin categorías personalizadas.</p>';
+    }
+    return items.map(c => `
+        <span class="badge text-bg-secondary me-1 mb-1 d-inline-flex align-items-center gap-1">
+            ${escapeHTML(c.nombre)}
+            <button type="button" class="btn-close btn-close-white btn-sm p-0"
+                style="font-size:.55em" aria-label="Eliminar ${escapeHTML(c.nombre)}"
+                data-delete-category="${escapeHTML(c.nombre)}"></button>
+        </span>
+    `).join('');
+}
+
+function renderManageCategoriesModal() {
+    document.getElementById('customExpenseCats').innerHTML = renderCustomCategoryGroup('expense');
+    document.getElementById('customIncomeCats').innerHTML = renderCustomCategoryGroup('income');
+
+    const defaults = getAllCategories().map(c =>
+        `<span class="badge text-bg-light border me-1 mb-1">${escapeHTML(c)}</span>`
+    ).join('');
+    document.getElementById('defaultCats').innerHTML = defaults;
+}
+
+async function addCustomCategory() {
+    const tipoSelect = document.getElementById('newCatTipo');
+    const nameInput = document.getElementById('newCatName');
+    const nombre = nameInput.value.trim();
+
+    if (!nombre) {
+        toast.showError('Escribí el nombre de la categoría.');
+        return;
+    }
+
+    const duplicate = getMergedCategories().some(
+        c => c.toLowerCase() === nombre.toLowerCase()
+    );
+    if (duplicate) {
+        toast.showWarning(`La categoría "${nombre}" ya existe.`);
+        return;
+    }
+
+    customCategories = [...customCategories, {
+        nombre,
+        tipo: tipoSelect.value,
+        createdAt: new Date().toISOString()
+    }];
+
+    nameInput.value = '';
+    await persistCustomCategories();
+    renderManageCategoriesModal();
+    refreshAfterCategoryChange();
+    toast.showSuccess(`Categoría "${nombre}" agregada.`);
+}
+
+async function deleteCustomCategory(nombre) {
+    customCategories = customCategories.filter(
+        c => c.nombre.toLowerCase() !== nombre.toLowerCase()
+    );
+    await persistCustomCategories();
+    renderManageCategoriesModal();
+    refreshAfterCategoryChange();
+    toast.showSuccess(`Categoría "${nombre}" eliminada.`);
+}
+
+function refreshAfterCategoryChange() {
+    // Repopulate every category surface (form datalist, filters, table inline datalists).
+    renderCategories();
+    render();
+}
+
+function setupManageCategoriesModal() {
+    const modalEl = document.getElementById('categoriesModal');
+    if (!modalEl) return;
+
+    modalEl.addEventListener('shown.bs.modal', renderManageCategoriesModal);
+
+    document.getElementById('btnAddCustomCat').addEventListener('click', () => {
+        addCustomCategory();
+    });
+
+    // Enter en el input también agrega
+    document.getElementById('newCatName').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            addCustomCategory();
+        }
+    });
+
+    // Delegación de eventos para los botones eliminar
+    ['customExpenseCats', 'customIncomeCats'].forEach(id => {
+        document.getElementById(id).addEventListener('click', (e) => {
+            const btn = e.target.closest('[data-delete-category]');
+            if (btn) {
+                deleteCustomCategory(btn.getAttribute('data-delete-category'));
+            }
+        });
+    });
+}
+
 // --- Auto-categorización con IA local (Ollama) -------------------
 
 async function autoCategorize() {
@@ -56,7 +188,7 @@ async function autoCategorize() {
     btn.disabled = true;
     btn.textContent = '🤔 Pensando...';
 
-    const categories = getAllCategories().map(c => `"${c}"`).join(', ');
+    const categories = getMergedCategories().map(c => `"${c}"`).join(', ');
 
     try {
         const controller = new AbortController();
@@ -84,7 +216,7 @@ Respondé SOLO con el nombre exacto de la categoría, sin puntos ni explicacione
             .replace(/[.,;:!?]+$/, '');            // saca puntuación al final
 
         // Buscar coincidencia exacta (case insensitive)
-        const allCats = getAllCategories();
+        const allCats = getMergedCategories();
         const match = allCats.find(
             c => c.toLowerCase() === suggestion.toLowerCase()
         );
@@ -99,14 +231,13 @@ Respondé SOLO con el nombre exacto de la categoría, sin puntos ni explicacione
             if (partial) {
                 document.getElementById('category').value = partial;
             } else {
-                toast.showWarning(`Gemma 4 sugirió "${suggestion}" pero no coincide con ninguna categoría. Categorías: ${allCats.join(', ')}`);
+                toast.showWarning(`La IA sugirió "${suggestion}" pero no coincide con ninguna categoría. Categorías: ${allCats.join(', ')}`);
             }
         }
     } catch (err) {
-        console.error('Error con Ollama:', err);
         const msg = err.name === 'AbortError'
             ? 'Ollama tardó demasiado (30s). Verificá que esté corriendo: ollama serve'
-            : 'No se pudo conectar con Gemma 4. ¿Está corriendo Ollama? (ollama serve)';
+            : 'No se pudo conectar con la IA. ¿Está corriendo Ollama? (ollama serve)';
         toast.showError(msg);
     } finally {
         btn.disabled = false;
@@ -154,7 +285,8 @@ function getFilteredEntries() {
     return filterEntries(entries, {
         type: filterType,
         category: filterCategory,
-        month: filterMonth,
+        monthFrom: filterMonthFrom,
+        monthTo: filterMonthTo,
         search: filterSearch
     });
 }
@@ -164,7 +296,7 @@ function getFilteredEntries() {
 function renderCategories() {
     const datalist = document.getElementById('categoryList');
     const filterSelect = document.getElementById('filterCategory');
-    const cats = getAllCategories();
+    const cats = getMergedCategories();
     const options = cats.map(c => `<option value="${escapeHTML(c)}">${escapeHTML(c)}</option>`).join('');
     datalist.innerHTML = options;
     // El filtro de categoría arranca con la opción "Todas"
@@ -277,7 +409,7 @@ function renderEditableCell(entry, field, value) {
     }
 
     if (field === 'categoria') {
-        const cats = getAllCategories().map(c => `<option value="${escapeHTML(c)}">`).join('');
+        const cats = getMergedCategories().map(c => `<option value="${escapeHTML(c)}">`).join('');
         return `<input type="text" class="${inputClass} inline-edit-${field}" value="${escapeHTML(value || '')}" list="inlineCatList-${entry.id}" data-field="${field}" data-entry-id="${entry.id}"><datalist id="inlineCatList-${entry.id}">${cats}</datalist>`;
     }
 
@@ -465,14 +597,25 @@ function renderCharts() {
         filtered.forEach(e => { map[e.categoria] = (map[e.categoria] || 0) + e.monto; });
         const labels = Object.keys(map);
         const data = Object.values(map);
-        const colors = [
-            '#dc3545', '#fd7e14', '#ffc107', '#198754', '#0d6efd', '#6f42c1',
-            '#e83e8c', '#20c997', '#17a2b8', '#6610f2'
-        ];
+        const colors = generateColors(labels.length, tipo);
         return {
             labels,
-            datasets: [{ data, backgroundColor: colors.slice(0, labels.length), borderWidth: 1, borderColor: gridColor }]
+            datasets: [{ data, backgroundColor: colors, borderWidth: 1, borderColor: gridColor }]
         };
+    }
+
+    function generateColors(count, tipo) {
+        // Ángulo dorado (~137.5°) — distribuye colores con máxima distancia visual
+        const hueStart = tipo === 'income' ? 140 : 0;
+        const goldenAngle = 137.508;
+        const results = [];
+        for (let i = 0; i < count; i++) {
+            const hue = (hueStart + i * goldenAngle) % 360;
+            const sat = 65 + (i % 2) * 12;
+            const light = 43 + (i % 3) * 7;
+            results.push(`hsl(${Math.round(hue)}, ${sat}%, ${light}%)`);
+        }
+        return results;
     }
 
     const ctxExpenses = document.getElementById('chartExpenses').getContext('2d');
@@ -598,18 +741,29 @@ async function renderRecommendations() {
     const comparison = calculateComparison(entries, currentMonth);
     const budgetProgress = calculateBudgetProgress(entries, budgets, currentMonth);
 
-    // Top 5 categorías de gasto
+    // Top 5 categorías de gasto (con subcategorías)
     const expensesByCategory = monthEntries
         .filter(e => e.tipo !== 'income')
         .reduce((acc, e) => {
-            acc[e.categoria] = (acc[e.categoria] || 0) + e.monto;
+            acc[e.categoria] = (acc[e.categoria] || { total: 0, subs: {} });
+            acc[e.categoria].total += e.monto;
+            if (e.subcategoria) {
+                acc[e.categoria].subs[e.subcategoria] = (acc[e.categoria].subs[e.subcategoria] || 0) + e.monto;
+            }
             return acc;
         }, {});
     const topCategories = Object.entries(expensesByCategory)
-        .sort(([, a], [, b]) => b - a)
+        .sort(([, a], [, b]) => b.total - a.total)
         .slice(0, 5)
-        .map(([cat, amount]) => `${cat}: ${formatAmount(amount)}`)
-        .join(', ') || 'Sin datos';
+        .map(([cat, data]) => {
+            const subList = Object.entries(data.subs)
+                .sort(([, a], [, b]) => b - a)
+                .map(([sub, amt]) => `${sub}: ${formatAmount(amt)}`)
+                .join('; ');
+            return subList
+                ? `${cat} (${formatAmount(data.total)}): ${subList}`
+                : `${cat}: ${formatAmount(data.total)}`;
+        }).join('\n  ') || 'Sin datos';
 
     // Estado de presupuestos
     const budgetStatus = budgetProgress.length > 0
@@ -632,7 +786,8 @@ Datos del mes:
 - Gastos: ${formatAmount(totalExpenses)}
 - Balance: ${formatAmount(balance)}
 - Promedio diario: ${formatAmount(dailyAvg)}
-- Top categorías: ${topCategories}
+- Top categorías de gasto (con desglose por subcategoría):
+  ${topCategories}
 - Presupuestos: ${budgetStatus}
 - ${comparisonText}
 
@@ -669,7 +824,7 @@ Respondé en español, formato:
             .filter(line => line.length > 0);
 
         if (recommendations.length === 0) {
-            toast.showWarning('Gemma 4 no devolvió recomendaciones. Intentá de nuevo.');
+            toast.showWarning('La IA no devolvió recomendaciones. Intentá de nuevo.');
             loadingEl.classList.add('d-none');
             emptyEl.classList.remove('d-none');
             return;
@@ -687,7 +842,7 @@ Respondé en español, formato:
         console.error('Error con Ollama:', err);
         const msg = err.name === 'AbortError'
             ? 'Ollama tardó demasiado (60s). Verificá que esté corriendo: ollama serve'
-            : 'No se pudo conectar con Gemma 4. ¿Está corriendo Ollama? (ollama serve)';
+            : 'No se pudo conectar con la IA. ¿Está corriendo Ollama? (ollama serve)';
         toast.showError(msg);
         loadingEl.classList.add('d-none');
         emptyEl.classList.remove('d-none');
@@ -831,7 +986,7 @@ function setupBudgetModal() {
     const saveBtn = document.getElementById('btnSaveBudgets');
 
     // Llenar formulario con todas las categorías
-    const allCats = getAllCategories();
+    const allCats = getMergedCategories();
     formFields.innerHTML = allCats.map(cat => {
         const value = budgets[cat] || '';
         return `
@@ -926,32 +1081,6 @@ function renderRecurring() {
             </div>
         </div>`;
     }).join('');
-
-    // Event listeners
-    document.querySelectorAll('.toggle-recurring').forEach(btn => {
-        btn.addEventListener('click', async (e) => {
-            const id = e.target.dataset.id;
-            const r = recurring.find(x => x.id === id);
-            if (r) {
-                recurring = recurring.map(x =>
-                    x.id === id ? { ...x, activo: !x.activo } : x
-                );
-                await storage.saveRecurring(recurring);
-                renderRecurring();
-            }
-        });
-    });
-
-    document.querySelectorAll('.delete-recurring').forEach(btn => {
-        btn.addEventListener('click', async (e) => {
-            const id = e.target.dataset.id;
-            if (confirm('¿Eliminar este recurrente?')) {
-                recurring = recurring.filter(x => x.id !== id);
-                await storage.saveRecurring(recurring);
-                renderRecurring();
-            }
-        });
-    });
 }
 
 function setupRecurringModal() {
@@ -983,7 +1112,7 @@ function setupRecurringModal() {
                         <label class="form-label">Categoría</label>
                         <select class="form-select rec-categoria" required>
                             <option value="">Seleccioná...</option>
-                            ${getAllCategories().map(c => `<option value="${escapeHTML(c)}">${escapeHTML(c)}</option>`).join('')}
+                            ${getMergedCategories().map(c => `<option value="${escapeHTML(c)}">${escapeHTML(c)}</option>`).join('')}
                         </select>
                     </div>
                     <div class="col-md-6">
@@ -1060,96 +1189,106 @@ function render() {
 
 // --- Exportar a CSV ----------------------------------------------
 
-function exportCSV() {
+function exportXLSX() {
     if (entries.length === 0) {
         toast.showWarning('No hay movimientos para exportar.');
         return;
     }
-
-    // CSV safe: neutraliza formulas (=, +, -, @) y comilla campos con separadores.
-    function csvSafe(value) {
-        let out = String(value ?? '');
-        if (/^[=+\-@]/.test(out)) out = "'" + out;
-        if (/[",\n\r]/.test(out)) out = '"' + out.replace(/"/g, '""') + '"';
-        return out;
+    if (typeof XLSX === 'undefined') {
+        toast.showError('No se pudo cargar la librería de Excel. Recargá la página.');
+        return;
     }
 
-    const lines = ['Fecha,Tipo,Categoria,Descripcion,Monto'];
-
     const sorted = [...entries].sort((a, b) => a.fecha.localeCompare(b.fecha));
-    sorted.forEach(e => {
-        const sign = e.tipo === 'income' ? '' : '-';
-        const monto = `${sign}${Number(e.monto).toFixed(2)}`;
-        lines.push([e.fecha, e.tipo, e.categoria, e.descripcion, monto]
-            .map(csvSafe).join(','));
+
+    // Mapear tipo a texto legible
+    const tipoLabel = { expense: 'Gasto', income: 'Ingreso', savings: 'Ahorro' };
+
+    // Preparar datos para la hoja
+    const rows = sorted.map(e => ({
+        'Fecha': e.fecha,
+        'Tipo': tipoLabel[e.tipo] || e.tipo,
+        'Categoría': e.categoria,
+        'Subcategoría': e.subcategoria || '',
+        'Descripción': e.descripcion,
+        'Monto': Number(e.monto)
+    }));
+
+    // Agregar fila de totales
+    const totals = calculateBalance(sorted);
+    rows.push({});
+    rows.push({
+        'Fecha': '',
+        'Tipo': '',
+        'Categoría': 'TOTALES',
+        'Subcategoría': '',
+        'Descripción': `Ingresos: ${formatAmount(totals.totalIncome)} | Gastos: ${formatAmount(totals.totalExpenses)} | Ahorros: ${formatAmount(totals.totalSavings)}`,
+        'Monto': totals.balance
     });
 
-    const csv = '\ufeff' + lines.join('\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
+    const ws = XLSX.utils.json_to_sheet(rows);
 
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `finanzas-${todayISO()}.csv`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    // Anchos de columna
+    ws['!cols'] = [
+        { wch: 12 },  // Fecha
+        { wch: 10 },  // Tipo
+        { wch: 18 },  // Categoría
+        { wch: 18 },  // Subcategoría
+        { wch: 30 },  // Descripción
+        { wch: 14 }   // Monto
+    ];
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Movimientos');
+
+    XLSX.writeFile(wb, `finanzas-${todayISO()}.xlsx`);
 }
 
 // --- Exportar / Importar JSON ------------------------------------
 
-function exportJSON() {
-    if (entries.length === 0) {
-        toast.showWarning('No hay movimientos para exportar.');
+function importXLSX(file) {
+    if (typeof XLSX === 'undefined') {
+        toast.showError('No se pudo cargar la librería de Excel. Recargá la página.');
         return;
     }
 
-    const data = {
-        version: 2,
-        exportedAt: todayISO(),
-        entries
-    };
-
-    const json = JSON.stringify(data, null, 2);
-    const blob = new Blob([json], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `finanzas-${todayISO()}.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-}
-
-function importJSON(file) {
     const reader = new FileReader();
     reader.onload = async (e) => {
         try {
-            const data = JSON.parse(e.target.result);
+            const wb = XLSX.read(e.target.result, { type: 'array' });
+            const ws = wb.Sheets[wb.SheetNames[0]];
+            const rows = XLSX.utils.sheet_to_json(ws);
 
-            // Validar estructura
-            if (!data.entries || !Array.isArray(data.entries)) {
-                toast.showError('El archivo no tiene datos válidos. Tiene que ser un JSON exportado desde esta app.');
+            if (rows.length === 0) {
+                toast.showWarning('El archivo no contiene datos.');
                 return;
             }
 
-            if (data.entries.length > 10000) {
-                toast.showError('El archivo contiene demasiados movimientos (máximo 10.000). Dividilo en partes más chicas.');
+            if (rows.length > 10000) {
+                toast.showError('El archivo contiene demasiados movimientos (máximo 10.000).');
                 return;
             }
 
-            // Normalizar y validar entrada por entrada; descartar las inválidas.
+            // Mapear tipo legible a código
+            const tipoMap = { 'Gasto': 'expense', 'Ingreso': 'income', 'Ahorro': 'savings' };
+
             const incoming = [];
             let skipped = 0;
-            data.entries.forEach(entry => {
+            rows.forEach(row => {
+                // Saltar filas vacías o de totales
+                if (!row.Fecha && !row.Tipo) return;
+
+                const tipo = tipoMap[row.Tipo] || row.Tipo || 'expense';
                 const normalized = {
-                    ...entry,
-                    tipo: entry.tipo || 'expense',
-                    monto: Number(entry.monto)
+                    id: crypto.randomUUID(),
+                    fecha: String(row.Fecha || ''),
+                    tipo: tipo,
+                    categoria: String(row['Categoría'] || row.Categoria || ''),
+                    subcategoria: String(row['Subcategoría'] || row.Subcategoria || ''),
+                    descripcion: String(row['Descripción'] || row.Descripcion || ''),
+                    monto: Number(row.Monto || row.monto || 0)
                 };
+
                 const errors = validateEntry({
                     tipo: normalized.tipo,
                     amount: normalized.monto,
@@ -1159,6 +1298,7 @@ function importJSON(file) {
                 const fechaValida = typeof normalized.fecha === 'string' &&
                     /^\d{4}-\d{2}-\d{2}$/.test(normalized.fecha) &&
                     !isNaN(Date.parse(normalized.fecha));
+
                 if (errors.length === 0 && fechaValida && isFinite(normalized.monto)) {
                     incoming.push(normalized);
                 } else {
@@ -1171,7 +1311,7 @@ function importJSON(file) {
                 return;
             }
 
-            const skipNote = skipped > 0 ? ` Se descartaron ${skipped} movimiento(s) inválido(s).` : '';
+            const skipNote = skipped > 0 ? ` Se descartaron ${skipped} fila(s) inválida(s).` : '';
             const msg = `¿Reemplazar todos los datos actuales (${entries.length} movimientos) con los del archivo (${incoming.length} movimientos)?${skipNote}`;
             if (!confirm(msg)) return;
 
@@ -1180,11 +1320,11 @@ function importJSON(file) {
             render();
             toast.showSuccess(`Importados ${incoming.length} movimientos correctamente.${skipNote}`);
         } catch (err) {
-            toast.showError('Error al leer el archivo. Asegurate de que sea un JSON válido exportado desde esta app.');
+            toast.showError('Error al leer el archivo. Asegurate de que sea un .xlsx válido.');
             console.error('Import error:', err);
         }
     };
-    reader.readAsText(file);
+    reader.readAsArrayBuffer(file);
 }
 
 // --- Eventos ------------------------------------------------------
@@ -1193,6 +1333,7 @@ async function init() {
     await loadFromStorage();
     await loadBudgets();
     await loadRecurring();
+    await loadCustomCategoriesFromStorage();
     await checkAndGenerateRecurring();
 
     // Fecha de hoy por defecto
@@ -1210,6 +1351,7 @@ async function init() {
     // Budget modal
     setupBudgetModal();
     setupRecurringModal();
+    setupManageCategoriesModal();
 
     // Submit del formulario (alta o edición)
     document.getElementById('expenseForm').addEventListener('submit', (e) => {
@@ -1258,8 +1400,12 @@ async function init() {
         filterCategory = e.target.value;
         render();
     });
-    document.getElementById('filterMonth').addEventListener('change', (e) => {
-        filterMonth = e.target.value;
+    document.getElementById('filterMonthFrom').addEventListener('change', (e) => {
+        filterMonthFrom = e.target.value;
+        render();
+    });
+    document.getElementById('filterMonthTo').addEventListener('change', (e) => {
+        filterMonthTo = e.target.value;
         render();
     });
 
@@ -1281,10 +1427,14 @@ async function init() {
     document.getElementById('btnClearFilters').addEventListener('click', () => {
         filterType = '';
         filterCategory = '';
-        filterMonth = '';
+        filterMonthFrom = '';
+        filterMonthTo = '';
+        filterSearch = '';
         document.getElementById('filterType').value = '';
         document.getElementById('filterCategory').value = '';
-        document.getElementById('filterMonth').value = '';
+        document.getElementById('filterMonthFrom').value = '';
+        document.getElementById('filterMonthTo').value = '';
+        document.getElementById('filterSearch').value = '';
         render();
     });
 
@@ -1307,6 +1457,33 @@ async function init() {
         }
         if (deleteBtn) {
             deleteEntry(deleteBtn.dataset.id);
+        }
+    });
+
+    // Acciones en gastos recurrentes (delegación — un solo listener)
+    document.getElementById('recurringList').addEventListener('click', async (e) => {
+        const toggleBtn = e.target.closest('.toggle-recurring');
+        const deleteBtn = e.target.closest('.delete-recurring');
+
+        if (toggleBtn) {
+            const id = toggleBtn.dataset.id;
+            const r = recurring.find(x => x.id === id);
+            if (r) {
+                recurring = recurring.map(x =>
+                    x.id === id ? { ...x, activo: !x.activo } : x
+                );
+                await storage.saveRecurring(recurring);
+                renderRecurring();
+            }
+        }
+
+        if (deleteBtn) {
+            const id = deleteBtn.dataset.id;
+            if (confirm('¿Eliminar este recurrente?')) {
+                recurring = recurring.filter(x => x.id !== id);
+                await storage.saveRecurring(recurring);
+                renderRecurring();
+            }
         }
     });
 
@@ -1398,20 +1575,17 @@ async function init() {
     // Modo oscuro
     document.getElementById('btnDarkMode').addEventListener('click', toggleDarkMode);
 
-    // Exportar CSV
-    document.getElementById('btnExportCSV').addEventListener('click', exportCSV);
+    // Exportar Excel
+    document.getElementById('btnExportCSV').addEventListener('click', exportXLSX);
 
-    // Exportar JSON
-    document.getElementById('btnExportJSON').addEventListener('click', exportJSON);
-
-    // Importar JSON
-    document.getElementById('btnImportJSON').addEventListener('click', () => {
-        document.getElementById('fileInputJSON').click();
+    // Importar Excel
+    document.getElementById('btnImportXLSX').addEventListener('click', () => {
+        document.getElementById('fileInputXLSX').click();
     });
-    document.getElementById('fileInputJSON').addEventListener('change', (e) => {
+    document.getElementById('fileInputXLSX').addEventListener('change', (e) => {
         if (e.target.files.length > 0) {
-            importJSON(e.target.files[0]);
-            e.target.value = ''; // permitir re-importar el mismo archivo
+            importXLSX(e.target.files[0]);
+            e.target.value = '';
         }
     });
 }

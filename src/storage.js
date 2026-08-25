@@ -6,13 +6,15 @@
 // =====================================================================
 
 const DB_NAME = 'finanzas_personales_2026';
-const DB_VERSION = 3; // v3: añadido store recurring
+const DB_VERSION = 4; // v3: añadido store recurring | v4: añadido store customCategories
 const STORE_NAME = 'entries';
 const BUDGETS_STORE = 'budgets';
 const RECURRING_STORE = 'recurring';
+const CUSTOM_CATEGORIES_STORE = 'customCategories';
 const LS_KEY = 'finanzas:gastos:v1';
 const LS_BUDGETS_KEY = 'finanzas:budgets:v1';
 const LS_RECURRING_KEY = 'finanzas:recurring:v1';
+const LS_CUSTOM_CATEGORIES_KEY = 'finanzas:custom-categories:v1';
 const LS_MIGRATED_KEY = 'finanzas:migrated';
 
 // --- Detección de soporte -------------------------------------------
@@ -41,6 +43,9 @@ function openDB() {
             }
             if (!db.objectStoreNames.contains(RECURRING_STORE)) {
                 db.createObjectStore(RECURRING_STORE, { keyPath: 'id' });
+            }
+            if (!db.objectStoreNames.contains(CUSTOM_CATEGORIES_STORE)) {
+                db.createObjectStore(CUSTOM_CATEGORIES_STORE, { keyPath: 'nombre' });
             }
         };
 
@@ -143,6 +148,38 @@ function idbClearRecurring(db) {
     });
 }
 
+// --- Custom categories helpers -----------------------------------------
+
+function idbGetAllCustomCategories(db) {
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(CUSTOM_CATEGORIES_STORE, 'readonly');
+        const store = tx.objectStore(CUSTOM_CATEGORIES_STORE);
+        const request = store.getAll();
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+    });
+}
+
+function idbPutAllCustomCategories(db, categories) {
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(CUSTOM_CATEGORIES_STORE, 'readwrite');
+        const store = tx.objectStore(CUSTOM_CATEGORIES_STORE);
+        categories.forEach(c => store.put(c));
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+    });
+}
+
+function idbClearCustomCategories(db) {
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(CUSTOM_CATEGORIES_STORE, 'readwrite');
+        const store = tx.objectStore(CUSTOM_CATEGORIES_STORE);
+        const request = store.clear();
+        request.onsuccess = () => resolve();
+        request.onerror = () => reject(request.error);
+    });
+}
+
 // --- localStorage fallback -------------------------------------------
 
 function lsLoad() {
@@ -200,6 +237,21 @@ function lsSaveRecurring(recurring) {
 
 function lsClearRecurring() {
     localStorage.removeItem(LS_RECURRING_KEY);
+}
+
+function lsLoadCustomCategories() {
+    try {
+        const raw = localStorage.getItem(LS_CUSTOM_CATEGORIES_KEY);
+        if (!raw) return [];
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : [];
+    } catch {
+        return [];
+    }
+}
+
+function lsSaveCustomCategories(categories) {
+    localStorage.setItem(LS_CUSTOM_CATEGORIES_KEY, JSON.stringify(categories));
 }
 
 // --- Migración localStorage → IndexedDB ----------------------------
@@ -344,13 +396,45 @@ async function saveRecurring(recurring) {
     }
 }
 
+// --- Custom categories API ---------------------------------------------
+
+async function loadCustomCategories() {
+    if (!isIDBAvailable()) {
+        return lsLoadCustomCategories();
+    }
+
+    try {
+        const db = await openDB();
+        return await idbGetAllCustomCategories(db);
+    } catch {
+        return lsLoadCustomCategories();
+    }
+}
+
+async function saveCustomCategories(categories) {
+    if (!isIDBAvailable()) {
+        lsSaveCustomCategories(categories);
+        return;
+    }
+
+    try {
+        const db = await openDB();
+        await idbClearCustomCategories(db);
+        if (categories.length > 0) {
+            await idbPutAllCustomCategories(db, categories);
+        }
+    } catch {
+        lsSaveCustomCategories(categories);
+    }
+}
+
 // --- Exports ---------------------------------------------------------
 
 // Soporte tanto para Node.js (vitest) como navegador
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { load, save, clear, loadBudgets, saveBudgets, loadRecurring, saveRecurring, isIDBAvailable };
+    module.exports = { load, save, clear, loadBudgets, saveBudgets, loadRecurring, saveRecurring, loadCustomCategories, saveCustomCategories, isIDBAvailable };
 }
 
 if (typeof window !== 'undefined') {
-    window.storage = { load, save, clear, loadBudgets, saveBudgets, loadRecurring, saveRecurring };
+    window.storage = { load, save, clear, loadBudgets, saveBudgets, loadRecurring, saveRecurring, loadCustomCategories, saveCustomCategories };
 }

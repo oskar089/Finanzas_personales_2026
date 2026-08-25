@@ -33,6 +33,22 @@ function getAllCategories() {
     return [...set];
 }
 
+function mergeCategories(baseList, customList) {
+    // Unión deduplicada de categorías base y personalizadas del usuario.
+    // Orden: base primero, luego personalizadas en orden de inserción.
+    // Dedupe case-insensitive conservando el casing de la primera aparición.
+    const result = [];
+    const seen = new Set();
+    [...(baseList || []), ...(customList || [])].forEach(cat => {
+        const key = String(cat).toLowerCase();
+        if (!seen.has(key)) {
+            seen.add(key);
+            result.push(cat);
+        }
+    });
+    return result;
+}
+
 function escapeHTML(str) {
     // Escapa caracteres que rompen innerHTML cuando vienen de input del usuario.
     return String(str ?? '')
@@ -82,16 +98,17 @@ function calculateBalance(entries) {
     return { totalIncome, totalExpenses, totalSavings, balance };
 }
 
-function filterEntries(entries, { type, category, month, search } = {}) {
+function filterEntries(entries, { type, category, monthFrom, monthTo, search } = {}) {
     const searchLower = search ? search.toLowerCase() : '';
     return entries.filter(e => {
         const passesType = !type || e.tipo === type;
         const passesCategory = !category || e.categoria === category;
-        const passesMonth = !month || e.fecha.startsWith(month);
+        const passesMonthFrom = !monthFrom || e.fecha.substring(0, 7) >= monthFrom;
+        const passesMonthTo = !monthTo || e.fecha.substring(0, 7) <= monthTo;
         const passesSearch = !searchLower ||
             (e.descripcion && e.descripcion.toLowerCase().includes(searchLower)) ||
             (e.categoria && e.categoria.toLowerCase().includes(searchLower));
-        return passesType && passesCategory && passesMonth && passesSearch;
+        return passesType && passesCategory && passesMonthFrom && passesMonthTo && passesSearch;
     });
 }
 
@@ -115,8 +132,8 @@ function validateEntry({ tipo, amount, category, description } = {}) {
 // --- Dashboard: funciones de métricas --------------------------------
 
 function getDaysInMonth(year, month) {
-    // month es 1-12
-    return new Date(year, month, 0).getDate();
+    // month es 1-12 (usa UTC para consistencia con el resto del dashboard)
+    return new Date(Date.UTC(year, month, 0)).getUTCDate();
 }
 
 function getDaysElapsedInMonth(year, month) {
@@ -153,10 +170,10 @@ function calculateComparison(entries, month) {
     if (!month) return { delta: 0, percent: 0, prevMonth: null };
     const [year, mon] = month.split('-').map(Number);
 
-    // Mes anterior
-    const prevDate = new Date(year, mon - 2, 1);
-    const prevYear = prevDate.getFullYear();
-    const prevMonth = String(prevDate.getMonth() + 1).padStart(2, '0');
+    // Mes anterior (usa UTC para consistencia)
+    const prevDate = new Date(Date.UTC(year, mon - 2, 1));
+    const prevYear = prevDate.getUTCFullYear();
+    const prevMonth = String(prevDate.getUTCMonth() + 1).padStart(2, '0');
     const prevKey = `${prevYear}-${prevMonth}`;
 
     const currentExpenses = entries
@@ -334,6 +351,7 @@ if (typeof module !== 'undefined' && module.exports) {
         EXPENSE_CATEGORIES,
         INCOME_CATEGORIES,
         getAllCategories,
+        mergeCategories,
         escapeHTML,
         formatAmount,
         todayISO,
@@ -359,6 +377,7 @@ if (typeof window !== 'undefined') {
     window.EXPENSE_CATEGORIES = EXPENSE_CATEGORIES;
     window.INCOME_CATEGORIES = INCOME_CATEGORIES;
     window.getAllCategories = getAllCategories;
+    window.mergeCategories = mergeCategories;
     window.escapeHTML = escapeHTML;
     window.formatAmount = formatAmount;
     window.todayISO = todayISO;

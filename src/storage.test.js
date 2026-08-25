@@ -110,3 +110,59 @@ describe('Compatibilidad backward compat', () => {
         expect(result[1].tipo).toBe('income');
     });
 });
+
+// -------------------------------------------------------------------
+// Categorías personalizadas (customCategories)
+// -------------------------------------------------------------------
+const sampleCustomCategories = [
+    { nombre: 'Mascotas', tipo: 'expense', createdAt: '2026-08-01T10:00:00.000Z' },
+    { nombre: 'Regalos', tipo: 'income', createdAt: '2026-08-02T10:00:00.000Z' }
+];
+
+describe('storage.saveCustomCategories() / loadCustomCategories()', () => {
+    beforeEach(async () => {
+        await storage.saveCustomCategories([]);
+        localStorage.removeItem('finanzas:custom-categories:v1');
+    });
+
+    afterEach(() => {
+        localStorage.removeItem('finanzas:custom-categories:v1');
+    });
+
+    it('guarda y recupera categorías personalizadas (roundtrip)', async () => {
+        await storage.saveCustomCategories(sampleCustomCategories);
+        const result = await storage.loadCustomCategories();
+        expect(result).toEqual(sampleCustomCategories);
+    });
+
+    it('reemplaza las categorías anteriores (patrón replace-all)', async () => {
+        await storage.saveCustomCategories(sampleCustomCategories);
+        await storage.saveCustomCategories([sampleCustomCategories[0]]);
+        const result = await storage.loadCustomCategories();
+        expect(result).toHaveLength(1);
+        expect(result[0].nombre).toBe('Mascotas');
+    });
+
+    it('devuelve array vacío cuando no hay datos', async () => {
+        const result = await storage.loadCustomCategories();
+        expect(Array.isArray(result)).toBe(true);
+        expect(result.length).toBe(0);
+    });
+
+    it('usa localStorage como fallback cuando IndexedDB no está disponible', async () => {
+        const original = globalThis.indexedDB;
+        globalThis.indexedDB = undefined;
+        try {
+            await storage.saveCustomCategories(sampleCustomCategories);
+
+            // Debe haberse escrito en localStorage, no en IndexedDB
+            const raw = JSON.parse(localStorage.getItem('finanzas:custom-categories:v1'));
+            expect(raw).toEqual(sampleCustomCategories);
+
+            const loaded = await storage.loadCustomCategories();
+            expect(loaded).toEqual(sampleCustomCategories);
+        } finally {
+            globalThis.indexedDB = original;
+        }
+    });
+});
