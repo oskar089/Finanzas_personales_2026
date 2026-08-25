@@ -10,8 +10,8 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-T3c6CoIi6uLrA9TneNEoa7RxnatzjcDSCmG1MXxSR1GAsXEV/Dwwykc2MPK8M2HN" crossorigin="anonymous">
     <!-- Chart.js 4.x por CDN (SRI: verifica integridad del archivo) -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js" defer integrity="sha384-vsrfeLOOY6KuIYKDlmVH5UiBmgIdB1oEf7p01YgWHuqmOHfZr374+odEv96n9tNC" crossorigin="anonymous"></script>
-    <!-- SheetJS (xlsx) para exportar a Excel — v0.20.3 (fix CVE-2023-30533) -->
-    <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js" defer></script>
+    <!-- SheetJS (xlsx) v0.20.3 — vendored locally (no SRI available from SheetJS CDN) -->
+    <script src="vendor/xlsx.full.min.js" defer></script>
     <link rel="stylesheet" href="styles.css">
 </head>
 <body class="bg-body-tertiary">
@@ -22,6 +22,7 @@
             <div class="d-flex align-items-center gap-3">
                 <span class="navbar-text" id="totalHeader">Balance: €0</span>
                 <button type="button" id="btnInstallPWA" class="btn btn-outline-success btn-sm d-none" title="Instalar app en tu dispositivo">📲 Instalar</button>
+                <button type="button" id="btnAiSettings" class="btn btn-outline-secondary btn-sm" title="Configurar IA" data-bs-toggle="modal" data-bs-target="#aiSettingsModal">⚙️ IA</button>
                 <button type="button" id="btnDarkMode" class="btn btn-outline-secondary btn-sm" title="Modo oscuro">🌙</button>
             </div>
         </div>
@@ -212,7 +213,7 @@
                         <div class="spinner-border spinner-border-sm text-primary" role="status">
                             <span class="visually-hidden">Analizando...</span>
                         </div>
-                        <span class="text-muted">Analizando tus finanzas con Gemma 4...</span>
+                        <span class="text-muted" id="recommendationsLoadingText">Analizando tus finanzas con IA...</span>
                     </div>
                 </div>
                 <div id="recommendationsNoData" class="d-none">
@@ -410,11 +411,68 @@
         </div>
     </div>
 
+    <!-- Modal Configurar IA -->
+    <div class="modal fade" id="aiSettingsModal" tabindex="-1" aria-labelledby="aiSettingsModalLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="aiSettingsModalLabel">⚙️ Configurar IA</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="text-muted small mb-3">Elegí el proveedor de IA y configurá la conexión.</p>
+
+                    <div class="mb-3">
+                        <label for="aiProvider" class="form-label">Proveedor</label>
+                        <select id="aiProvider" class="form-select">
+                            <option value="local">Local (OpenAI-compatible)</option>
+                            <option value="openai">OpenAI</option>
+                            <option value="gemini">Google Gemini</option>
+                            <option value="claude">Claude</option>
+                        </select>
+                    </div>
+
+                    <div class="mb-3" id="aiBaseUrlGroup">
+                        <label for="aiBaseUrl" class="form-label">URL base</label>
+                        <input type="url" id="aiBaseUrl" class="form-control" placeholder="http://localhost:11434">
+                    </div>
+
+                    <div class="mb-3 d-none" id="aiApiKeyGroup">
+                        <label for="aiApiKey" class="form-label">API Key</label>
+                        <div class="input-group">
+                            <input type="password" id="aiApiKey" class="form-control" placeholder="sk-...">
+                            <button type="button" class="btn btn-outline-secondary" id="btnToggleApiKey" title="Mostrar/ocultar API key">👁️</button>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="aiModel" class="form-label">Modelo</label>
+                        <div class="input-group">
+                            <input type="text" id="aiModel" class="form-control" placeholder="gemma3:4b">
+                            <button type="button" class="btn btn-outline-secondary" id="btnDiscoverModels" title="Descubrir modelos disponibles">🔍</button>
+                        </div>
+                        <div id="aiModelList" class="mt-1"><!-- Discover buttons rendered here --></div>
+                    </div>
+
+                    <div class="d-flex align-items-center gap-2 mb-3">
+                        <button type="button" class="btn btn-outline-info btn-sm" id="btnTestConnection">Probar conexión</button>
+                        <span id="aiConnectionStatus" class="small"></span>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="button" class="btn btn-primary" id="btnSaveAiSettings">Guardar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Bootstrap 5.3 JS bundle (popper included) -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js" integrity="sha384-C6RzsynM9kWDrMNeT87bh95OGNyZPhcTNXj1NW7RuBCsyN/o0jlpcV8Qyq46cDfL" crossorigin="anonymous"></script>
     <script src="src/finance.js"></script>
     <script src="src/storage.js"></script>
     <script src="src/toast.js"></script>
+    <script src="src/ai-providers.js"></script>
     <script src="app.js"></script>
     <script>
         if ('serviceWorker' in navigator) {

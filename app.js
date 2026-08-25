@@ -12,8 +12,6 @@
 // --- Constantes ---------------------------------------------------
 
 const DARK_MODE_KEY = 'finanzas:dark-mode';
-const OLLAMA_URL = 'http://localhost:11434/api/generate';
-const OLLAMA_MODEL = 'gemma3:4b';
 
 // --- Estado -------------------------------------------------------
 
@@ -28,6 +26,7 @@ let inlineEditingId = null; // null = sin edición inline, string = ID de la fil
 let inlineEditField = null; // null = edición de fila completa, string = campo individual
 let searchDebounceTimer = null;
 let customCategories = [];  // [{ nombre, tipo: 'expense'|'income', createdAt }] definidas por el usuario
+let aiSettings = null;      // configuración activa de IA (cargada desde storage)
 
 // --- Persistencia -------------------------------------------------
 
@@ -69,6 +68,17 @@ async function loadCustomCategoriesFromStorage() {
 async function persistCustomCategories() {
     if (storage.saveCustomCategories) {
         await storage.saveCustomCategories(customCategories);
+    }
+}
+
+// --- AI Settings --------------------------------------------------
+
+async function loadAiSettingsFromStorage() {
+    try {
+        aiSettings = await storage.loadAiSettings();
+    } catch (err) {
+        console.error('No se pudieron leer las configuraciones de IA.', err);
+        aiSettings = null;
     }
 }
 
@@ -175,7 +185,172 @@ function setupManageCategoriesModal() {
     });
 }
 
-// --- Auto-categorización con IA local (Ollama) -------------------
+// --- Modal configurar IA -------------------------------------------
+
+function setupAiSettingsModal() {
+    const modalEl = document.getElementById('aiSettingsModal');
+    if (!modalEl) return;
+
+    const providerSelect = document.getElementById('aiProvider');
+    const baseUrlGroup = document.getElementById('aiBaseUrlGroup');
+    const baseUrlInput = document.getElementById('aiBaseUrl');
+    const apiKeyGroup = document.getElementById('aiApiKeyGroup');
+    const apiKeyInput = document.getElementById('aiApiKey');
+    const modelInput = document.getElementById('aiModel');
+    const modelListEl = document.getElementById('aiModelList');
+    const statusEl = document.getElementById('aiConnectionStatus');
+    const btnDiscover = document.getElementById('btnDiscoverModels');
+    const btnTest = document.getElementById('btnTestConnection');
+    const btnSave = document.getElementById('btnSaveAiSettings');
+    const btnToggleKey = document.getElementById('btnToggleApiKey');
+
+    // Default values per provider
+    const PROVIDER_DEFAULTS = {
+        local: { baseUrl: 'http://localhost:11434', apiKey: '', model: 'gemma3:4b' },
+        openai: { baseUrl: 'https://api.openai.com', apiKey: '', model: 'gpt-4o' },
+        gemini: { baseUrl: 'https://generativelanguage.googleapis.com', apiKey: '', model: 'gemini-2.0-flash' },
+        claude: { baseUrl: 'https://api.anthropic.com', apiKey: '', model: 'claude-sonnet-4-20250514' }
+    };
+
+    function updateFieldVisibility() {
+        const provider = providerSelect.value;
+        const isLocal = provider === 'local';
+        const needsKey = provider !== 'local';
+        const hasModelsEndpoint = provider === 'local' || provider === 'openai';
+
+        baseUrlGroup.classList.toggle('d-none', !isLocal);
+        apiKeyGroup.classList.toggle('d-none', !needsKey);
+        btnDiscover.classList.toggle('d-none', !hasModelsEndpoint);
+    }
+
+    // Populate modal from saved settings
+    modalEl.addEventListener('shown.bs.modal', async () => {
+        statusEl.textContent = '';
+        modelListEl.innerHTML = '';
+
+        const settings = aiSettings || {};
+        const provider = settings.provider || 'local';
+        providerSelect.value = provider;
+        baseUrlInput.value = settings.baseUrl || PROVIDER_DEFAULTS[provider].baseUrl || '';
+        apiKeyInput.value = settings.apiKey || '';
+        modelInput.value = settings.model || PROVIDER_DEFAULTS[provider].model || '';
+
+        updateFieldVisibility();
+    });
+
+    // Provider change: update defaults and visibility
+    providerSelect.addEventListener('change', () => {
+        const provider = providerSelect.value;
+        const defaults = PROVIDER_DEFAULTS[provider];
+        baseUrlInput.value = defaults.baseUrl;
+        apiKeyInput.value = defaults.apiKey;
+        modelInput.value = defaults.model;
+        modelListEl.innerHTML = '';
+        statusEl.textContent = '';
+        updateFieldVisibility();
+    });
+
+    // Toggle API key visibility
+    btnToggleKey.addEventListener('click', () => {
+        const isPassword = apiKeyInput.type === 'password';
+        apiKeyInput.type = isPassword ? 'text' : 'password';
+        btnToggleKey.textContent = isPassword ? '🙈' : '👁️';
+    });
+
+    // Discover models
+    btnDiscover.addEventListener('click', async () => {
+        const settings = {
+            provider: providerSelect.value,
+            baseUrl: baseUrlInput.value.trim(),
+            apiKey: apiKeyInput.value.trim()
+        };
+
+        btnDiscover.disabled = true;
+        btnDiscover.textContent = '⏳';
+        modelListEl.innerHTML = '';
+
+        try {
+            const models = await aiProviders.discoverModels(settings);
+            if (models.length === 0) {
+                modelListEl.innerHTML = '<small class="text-muted">No se encontraron modelos. Ingresá el nombre manualmente.</small>';
+            } else {
+                modelListEl.innerHTML = models.map(m =>
+                    `<button type="button" class="btn btn-outline-secondary btn-sm me-1 mb-1 btn-select-model" data-model="${escapeHTML(m)}">${escapeHTML(m)}</button>`
+                ).join('');
+            }
+        } catch {
+            modelListEl.innerHTML = '<small class="text-muted">Error al descubrir modelos. Ingresá el nombre manualmente.</small>';
+        } finally {
+            btnDiscover.disabled = false;
+            btnDiscover.textContent = '🔍';
+        }
+    });
+
+    // Delegate model selection clicks
+    modelListEl.addEventListener('click', (e) => {
+        const btn = e.target.closest('.btn-select-model');
+        if (btn) {
+            modelInput.value = btn.dataset.model;
+        }
+    });
+
+    // Test connection
+    btnTest.addEventListener('click', async () => {
+        const settings = {
+            provider: providerSelect.value,
+            baseUrl: baseUrlInput.value.trim(),
+            apiKey: apiKeyInput.value.trim(),
+            model: modelInput.value.trim()
+        };
+
+        btnTest.disabled = true;
+        statusEl.textContent = 'Probando...';
+        statusEl.className = 'small text-muted';
+
+        try {
+            const result = await aiProviders.testConnection(settings);
+            if (result.ok) {
+                statusEl.textContent = '✓ Conectado';
+                statusEl.className = 'small text-success';
+            } else {
+                statusEl.textContent = `✗ Error: ${result.error}`;
+                statusEl.className = 'small text-danger';
+            }
+        } catch (err) {
+            statusEl.textContent = `✗ Error: ${err.message}`;
+            statusEl.className = 'small text-danger';
+        } finally {
+            btnTest.disabled = false;
+        }
+    });
+
+    // Save settings
+    btnSave.addEventListener('click', async () => {
+        const settings = {
+            provider: providerSelect.value,
+            baseUrl: baseUrlInput.value.trim(),
+            apiKey: apiKeyInput.value.trim(),
+            model: modelInput.value.trim()
+        };
+
+        if (!settings.model) {
+            toast.showWarning('Ingresá un nombre de modelo.');
+            return;
+        }
+
+        await storage.saveAiSettings(settings);
+        aiSettings = settings;
+        bootstrap.Modal.getInstance(modalEl).hide();
+        toast.showSuccess('Configuración de IA guardada.');
+    });
+}
+
+// --- Auto-categorización con IA --------------------------------------
+
+function getActiveModelName() {
+    if (aiSettings && aiSettings.model) return aiSettings.model;
+    return 'IA';
+}
 
 async function autoCategorize() {
     const desc = document.getElementById('description').value.trim();
@@ -191,27 +366,18 @@ async function autoCategorize() {
     const categories = getMergedCategories().map(c => `"${c}"`).join(', ');
 
     try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 30000);
-        const res = await fetch(OLLAMA_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                model: OLLAMA_MODEL,
-                prompt: `Sos un asistente financiero. Clasificá este gasto o ingreso en UNA de estas categorías: ${categories}.
-Descripción: "${desc}"
-Respondé SOLO con el nombre exacto de la categoría, sin puntos ni explicaciones.`,
-                stream: false,
-                options: { temperature: 0.1, max_tokens: 20 }
-            }),
-            signal: controller.signal
-        });
-        clearTimeout(timeoutId);
+        const response = await aiProviders.chatCompletion([
+            {
+                role: 'system',
+                content: 'Sos un asistente financiero. Respondé SOLO con el nombre exacto de la categoría, sin puntos ni explicaciones.'
+            },
+            {
+                role: 'user',
+                content: `Clasificá este gasto o ingreso en UNA de estas categorías: ${categories}.\nDescripción: "${desc}"`
+            }
+        ], { temperature: 0.1, max_tokens: 20 });
 
-        if (!res.ok) throw new Error(`Ollama respondió ${res.status}`);
-
-        const data = await res.json();
-        let suggestion = data.response.trim()
+        let suggestion = response.text.trim()
             .replace(/^["'*]+|["'*.]+$/g, '')    // saca comillas/asteriscos al inicio/fin
             .replace(/[.,;:!?]+$/, '');            // saca puntuación al final
 
@@ -236,8 +402,8 @@ Respondé SOLO con el nombre exacto de la categoría, sin puntos ni explicacione
         }
     } catch (err) {
         const msg = err.name === 'AbortError'
-            ? 'Ollama tardó demasiado (30s). Verificá que esté corriendo: ollama serve'
-            : 'No se pudo conectar con la IA. ¿Está corriendo Ollama? (ollama serve)';
+            ? `La IA tardó demasiado (30s). Verificá la conexión al proveedor.`
+            : `No se pudo conectar con la IA. Verificá la configuración del proveedor.`;
         toast.showError(msg);
     } finally {
         btn.disabled = false;
@@ -704,7 +870,7 @@ function renderDashboard() {
     document.getElementById('dashDaysLeft').textContent = daysLeft;
 }
 
-// --- Recomendaciones financieras (IA local) --------------------------
+// --- Recomendaciones financieras (IA) --------------------------------
 
 async function renderRecommendations() {
     const emptyEl = document.getElementById('recommendationsEmpty');
@@ -713,7 +879,6 @@ async function renderRecommendations() {
     const resultEl = document.getElementById('recommendationsResult');
     const listEl = document.getElementById('recommendationsList');
     const btn = document.getElementById('btnAnalyzeFinance');
-    const btnRe = document.getElementById('btnReAnalyze');
 
     // Verificar si hay datos
     if (entries.length === 0) {
@@ -729,6 +894,8 @@ async function renderRecommendations() {
     noDataEl.classList.add('d-none');
     resultEl.classList.add('d-none');
     loadingEl.classList.remove('d-none');
+    document.getElementById('recommendationsLoadingText').textContent =
+        `Analizando tus finanzas con ${getActiveModelName()}...`;
     btn.disabled = true;
 
     // Calcular datos financieros del mes actual
@@ -797,28 +964,15 @@ Respondé en español, formato:
 ...`;
 
     try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 60000);
-        const res = await fetch(OLLAMA_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                model: OLLAMA_MODEL,
-                prompt,
-                stream: false,
-                options: { temperature: 0.3, max_tokens: 500 }
-            }),
-            signal: controller.signal
-        });
-        clearTimeout(timeoutId);
+        const response = await aiProviders.chatCompletion([
+            { role: 'system', content: 'Sos un asistente financiero personal experto.' },
+            { role: 'user', content: prompt }
+        ], { temperature: 0.3, max_tokens: 500 });
 
-        if (!res.ok) throw new Error(`Ollama respondió ${res.status}`);
-
-        const data = await res.json();
-        const response = data.response.trim();
+        const text = response.text;
 
         // Parsear consejos numerados (1. ... 2. ... etc.)
-        const recommendations = response
+        const recommendations = text
             .split(/\n/)
             .map(line => line.replace(/^\d+[\.\)]\s*/, '').trim())
             .filter(line => line.length > 0);
@@ -839,10 +993,10 @@ Respondé en español, formato:
         resultEl.classList.remove('d-none');
         toast.showSuccess('Recomendaciones generadas correctamente.');
     } catch (err) {
-        console.error('Error con Ollama:', err);
+        console.error('Error con IA:', err);
         const msg = err.name === 'AbortError'
-            ? 'Ollama tardó demasiado (60s). Verificá que esté corriendo: ollama serve'
-            : 'No se pudo conectar con la IA. ¿Está corriendo Ollama? (ollama serve)';
+            ? `La IA tardó demasiado (60s). Verificá la conexión al proveedor.`
+            : `No se pudo conectar con la IA. Verificá la configuración del proveedor.`;
         toast.showError(msg);
         loadingEl.classList.add('d-none');
         emptyEl.classList.remove('d-none');
@@ -1340,6 +1494,7 @@ async function init() {
     await loadBudgets();
     await loadRecurring();
     await loadCustomCategoriesFromStorage();
+    await loadAiSettingsFromStorage();
     await checkAndGenerateRecurring();
 
     // Fecha de hoy por defecto
@@ -1358,6 +1513,7 @@ async function init() {
     setupBudgetModal();
     setupRecurringModal();
     setupManageCategoriesModal();
+    setupAiSettingsModal();
 
     // Submit del formulario (alta o edición)
     document.getElementById('expenseForm').addEventListener('submit', (e) => {

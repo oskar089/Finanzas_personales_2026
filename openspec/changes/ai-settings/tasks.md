@@ -47,18 +47,18 @@ Chain strategy: pending
 
 ## Phase 3: Settings UI (Modal + Navbar)
 
-- [ ] 3.1 `index.html`: Add `<script src="src/ai-providers.js">` before `app.js` script tag
-- [ ] 3.2 `index.html`: Add `⚙️ IA` button in navbar next to dark mode toggle, `data-bs-toggle="modal" data-bs-target="#aiSettingsModal"`
-- [ ] 3.3 `index.html`: Add `#aiSettingsModal` Bootstrap modal with fields: provider dropdown, base URL input, API key input (password toggle), model input, 🔍 discover button, test connection button, cancel/save buttons
-- [ ] 3.4 `index.html`: Modal body wired with IDs matching design: `#aiProvider`, `#aiBaseUrl`, `#aiApiKey`, `#aiModel`, `#btnDiscoverModels`, `#btnTestConnection`, `#aiConnectionStatus`
+- [x] 3.1 `index.html`: Add `<script src="src/ai-providers.js">` before `app.js` script tag
+- [x] 3.2 `index.html`: Add `⚙️ IA` button in navbar next to dark mode toggle, `data-bs-toggle="modal" data-bs-target="#aiSettingsModal"`
+- [x] 3.3 `index.html`: Add `#aiSettingsModal` Bootstrap modal with fields: provider dropdown, base URL input, API key input (password toggle), model input, 🔍 discover button, test connection button, cancel/save buttons
+- [x] 3.4 `index.html`: Modal body wired with IDs matching design: `#aiProvider`, `#aiBaseUrl`, `#aiApiKey`, `#aiModel`, `#btnDiscoverModels`, `#btnTestConnection`, `#aiConnectionStatus`
 
 ## Phase 4: App.js Integration
 
-- [ ] 4.1 `app.js`: Remove `OLLAMA_URL` and `OLLAMA_MODEL` constants (lines 15–16)
-- [ ] 4.2 `app.js`: In `autoCategorize()` (line 196): replace `fetch(OLLAMA_URL, ...)` with `aiProviders.chatCompletion([...messages], { temperature: 0.1, max_tokens: 20 })` — adapt response parsing from `data.response` to `data.choices[0].message.content`
-- [ ] 4.3 `app.js`: In `renderRecommendations()` (line 802): same replacement — replace raw fetch with `aiProviders.chatCompletion()`, adapt response parsing
-- [ ] 4.4 `app.js`: Add settings modal event wiring: load current settings on modal open, populate fields, handle provider change (show/hide URL, API key, discover button), wire save/cancel/test-discover buttons
-- [ ] 4.5 `app.js`: Add `loadAiSettings()` call at app init (before AI-dependent features are used) to cache active provider config
+- [x] 4.1 `app.js`: Remove `OLLAMA_URL` and `OLLAMA_MODEL` constants (lines 15–16)
+- [x] 4.2 `app.js`: In `autoCategorize()` (line 196): replace `fetch(OLLAMA_URL, ...)` with `aiProviders.chatCompletion([...messages], { temperature: 0.1, max_tokens: 20 })` — adapt response parsing from `data.response` to `data.choices[0].message.content`
+- [x] 4.3 `app.js`: In `renderRecommendations()` (line 802): same replacement — replace raw fetch with `aiProviders.chatCompletion()`, adapt response parsing
+- [x] 4.4 `app.js`: Add settings modal event wiring: load current settings on modal open, populate fields, handle provider change (show/hide URL, API key, discover button), wire save/cancel/test-discover buttons
+- [x] 4.5 `app.js`: Add `loadAiSettings()` call at app init (before AI-dependent features are used) to cache active provider config
 
 ## Phase 5: Testing
 
