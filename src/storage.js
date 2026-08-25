@@ -6,15 +6,17 @@
 // =====================================================================
 
 const DB_NAME = 'finanzas_personales_2026';
-const DB_VERSION = 4; // v3: añadido store recurring | v4: añadido store customCategories
+const DB_VERSION = 5; // v3: añadido store recurring | v4: añadido store customCategories | v5: añadido store aiSettings
 const STORE_NAME = 'entries';
 const BUDGETS_STORE = 'budgets';
 const RECURRING_STORE = 'recurring';
 const CUSTOM_CATEGORIES_STORE = 'customCategories';
+const AI_SETTINGS_STORE = 'aiSettings';
 const LS_KEY = 'finanzas:gastos:v1';
 const LS_BUDGETS_KEY = 'finanzas:budgets:v1';
 const LS_RECURRING_KEY = 'finanzas:recurring:v1';
 const LS_CUSTOM_CATEGORIES_KEY = 'finanzas:custom-categories:v1';
+const LS_AI_SETTINGS_KEY = 'finanzas:ai-settings:v1';
 const LS_MIGRATED_KEY = 'finanzas:migrated';
 
 // --- Detección de soporte -------------------------------------------
@@ -46,6 +48,9 @@ function openDB() {
             }
             if (!db.objectStoreNames.contains(CUSTOM_CATEGORIES_STORE)) {
                 db.createObjectStore(CUSTOM_CATEGORIES_STORE, { keyPath: 'nombre' });
+            }
+            if (!db.objectStoreNames.contains(AI_SETTINGS_STORE)) {
+                db.createObjectStore(AI_SETTINGS_STORE, { keyPath: 'id' });
             }
         };
 
@@ -180,6 +185,28 @@ function idbClearCustomCategories(db) {
     });
 }
 
+// --- AI Settings helpers -----------------------------------------------
+
+function idbGetAiSettings(db) {
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(AI_SETTINGS_STORE, 'readonly');
+        const store = tx.objectStore(AI_SETTINGS_STORE);
+        const request = store.get('active');
+        request.onsuccess = () => resolve(request.result || null);
+        request.onerror = () => reject(request.error);
+    });
+}
+
+function idbPutAiSettings(db, settings) {
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(AI_SETTINGS_STORE, 'readwrite');
+        const store = tx.objectStore(AI_SETTINGS_STORE);
+        store.put(settings);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+    });
+}
+
 // --- localStorage fallback -------------------------------------------
 
 function lsLoad() {
@@ -252,6 +279,21 @@ function lsLoadCustomCategories() {
 
 function lsSaveCustomCategories(categories) {
     localStorage.setItem(LS_CUSTOM_CATEGORIES_KEY, JSON.stringify(categories));
+}
+
+function lsLoadAiSettings() {
+    try {
+        const raw = localStorage.getItem(LS_AI_SETTINGS_KEY);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        return parsed && typeof parsed === 'object' ? parsed : null;
+    } catch {
+        return null;
+    }
+}
+
+function lsSaveAiSettings(settings) {
+    localStorage.setItem(LS_AI_SETTINGS_KEY, JSON.stringify(settings));
 }
 
 // --- Migración localStorage → IndexedDB ----------------------------
@@ -428,13 +470,66 @@ async function saveCustomCategories(categories) {
     }
 }
 
+// --- AI Settings API ----------------------------------------------------
+
+async function loadAiSettings() {
+    if (!isIDBAvailable()) {
+        return lsLoadAiSettings();
+    }
+
+    try {
+        const db = await openDB();
+        return await idbGetAiSettings(db);
+    } catch {
+        return lsLoadAiSettings();
+    }
+}
+
+async function saveAiSettings(settings) {
+    if (!settings) {
+        // Clear settings
+        if (!isIDBAvailable()) {
+            localStorage.removeItem(LS_AI_SETTINGS_KEY);
+            return;
+        }
+        try {
+            const db = await openDB();
+            const tx = db.transaction(AI_SETTINGS_STORE, 'readwrite');
+            tx.objectStore(AI_SETTINGS_STORE).delete('active');
+            await new Promise((resolve, reject) => {
+                tx.oncomplete = resolve;
+                tx.onerror = () => reject(tx.error);
+            });
+        } catch {
+            // ignore
+        }
+        localStorage.removeItem(LS_AI_SETTINGS_KEY);
+        return;
+    }
+
+    const record = { ...settings, id: 'active', updatedAt: Date.now() };
+
+    if (!isIDBAvailable()) {
+        lsSaveAiSettings(record);
+        return;
+    }
+
+    try {
+        const db = await openDB();
+        await idbPutAiSettings(db, record);
+        lsSaveAiSettings(record);
+    } catch {
+        lsSaveAiSettings(record);
+    }
+}
+
 // --- Exports ---------------------------------------------------------
 
 // Soporte tanto para Node.js (vitest) como navegador
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { load, save, clear, loadBudgets, saveBudgets, loadRecurring, saveRecurring, loadCustomCategories, saveCustomCategories, isIDBAvailable };
+    module.exports = { load, save, clear, loadBudgets, saveBudgets, loadRecurring, saveRecurring, loadCustomCategories, saveCustomCategories, loadAiSettings, saveAiSettings, isIDBAvailable };
 }
 
 if (typeof window !== 'undefined') {
-    window.storage = { load, save, clear, loadBudgets, saveBudgets, loadRecurring, saveRecurring, loadCustomCategories, saveCustomCategories };
+    window.storage = { load, save, clear, loadBudgets, saveBudgets, loadRecurring, saveRecurring, loadCustomCategories, saveCustomCategories, loadAiSettings, saveAiSettings };
 }
