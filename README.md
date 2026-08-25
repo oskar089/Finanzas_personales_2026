@@ -23,6 +23,7 @@ A Progressive Web App to track personal finances (expenses, income and savings) 
 - **Export to Excel (.xlsx)** with formatted columns and totals.
 - **Import from Excel (.xlsx/.xls)** with validation.
 - Data stored in the browser (IndexedDB with localStorage fallback). It never leaves your machine.
+- **Important**: If you clear browser data or uninstall the app, all data is lost. Export to Excel regularly as backup.
 - Service Worker for offline support (network-first for local assets, cache-first for CDN).
 - One-click launcher (`start.bat`) for Windows.
 

@@ -5,7 +5,7 @@
 // Cache-first para CDN (no cambian y tienen SRI).
 // =====================================================================
 
-const CACHE_NAME = 'finanzas-v2';
+const CACHE_NAME = 'finanzas-v4';
 const ASSETS = [
     '/',
     '/index.html',
@@ -15,7 +15,7 @@ const ASSETS = [
     '/src/storage.js',
     'https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css',
     'https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js',
-    'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js'
+    'https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js'
 ];
 
 // --- Instalación: pre-cache de assets -------------------------------
@@ -50,6 +50,11 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
     const url = new URL(event.request.url);
+
+    // Ollama API: siempre ir a la red (nunca cachear respuestas de IA)
+    if (url.hostname === 'localhost' && url.port === '11434') {
+        return;
+    }
 
     // CDN assets: cache-first (ya tienen SRI integrity hashes)
     if (url.origin !== location.origin) {

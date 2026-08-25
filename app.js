@@ -1199,6 +1199,12 @@ function exportXLSX() {
         return;
     }
 
+    // Sanitize: prefix dangerous chars to prevent formula injection
+    const sanitize = (val) => {
+        if (typeof val !== 'string') return val;
+        return /^[=+\-@\t\r]/.test(val) ? "'" + val : val;
+    };
+
     const sorted = [...entries].sort((a, b) => a.fecha.localeCompare(b.fecha));
 
     // Mapear tipo a texto legible
@@ -1208,9 +1214,9 @@ function exportXLSX() {
     const rows = sorted.map(e => ({
         'Fecha': e.fecha,
         'Tipo': tipoLabel[e.tipo] || e.tipo,
-        'Categoría': e.categoria,
-        'Subcategoría': e.subcategoria || '',
-        'Descripción': e.descripcion,
+        'Categoría': sanitize(e.categoria),
+        'Subcategoría': sanitize(e.subcategoria || ''),
+        'Descripción': sanitize(e.descripcion),
         'Monto': Number(e.monto)
     }));
 
@@ -1587,6 +1593,32 @@ async function init() {
             importXLSX(e.target.files[0]);
             e.target.value = '';
         }
+    });
+
+    // PWA Install Prompt
+    let deferredPrompt = null;
+    const btnInstall = document.getElementById('btnInstallPWA');
+
+    window.addEventListener('beforeinstallprompt', (e) => {
+        e.preventDefault();
+        deferredPrompt = e;
+        btnInstall.classList.remove('d-none');
+    });
+
+    btnInstall.addEventListener('click', async () => {
+        if (!deferredPrompt) return;
+        deferredPrompt.prompt();
+        const { outcome } = await deferredPrompt.userChoice;
+        if (outcome === 'accepted') {
+            toast.showSuccess('¡App instalada! La encontrás en tu escritorio o menú de apps.');
+        }
+        deferredPrompt = null;
+        btnInstall.classList.add('d-none');
+    });
+
+    window.addEventListener('appinstalled', () => {
+        deferredPrompt = null;
+        btnInstall.classList.add('d-none');
     });
 }
 

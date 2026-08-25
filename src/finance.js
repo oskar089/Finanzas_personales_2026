@@ -71,11 +71,11 @@ function formatAmount(n) {
 
 function todayISO() {
     // Devuelve la fecha de hoy en formato YYYY-MM-DD para el input date.
-    // Usa UTC para evitar desfases cerca de medianoche según timezone.
+    // Usa hora local para que coincida con la zona horaria del usuario.
     const d = new Date();
-    const yyyy = d.getUTCFullYear();
-    const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
-    const dd = String(d.getUTCDate()).padStart(2, '0');
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
     return `${yyyy}-${mm}-${dd}`;
 }
 
