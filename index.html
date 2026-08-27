@@ -23,6 +23,7 @@
                 <span class="navbar-text" id="totalHeader">Balance: €0</span>
                 <button type="button" id="btnInstallPWA" class="btn btn-outline-success btn-sm d-none" title="Instalar app en tu dispositivo">📲 Instalar</button>
                 <button type="button" id="btnAiSettings" class="btn btn-outline-secondary btn-sm" title="Configurar IA" data-bs-toggle="modal" data-bs-target="#aiSettingsModal">⚙️ IA</button>
+                <button type="button" id="btnCurrencySettings" class="btn btn-outline-secondary btn-sm" title="Configurar moneda" data-bs-toggle="modal" data-bs-target="#currencySettingsModal">⚙️ Ajustes</button>
                 <button type="button" id="btnDarkMode" class="btn btn-outline-secondary btn-sm" title="Modo oscuro">🌙</button>
             </div>
         </div>
@@ -48,7 +49,10 @@
                     </div>
                     <div class="col-md-2">
                         <label for="amount" class="form-label">Monto</label>
-                        <input type="number" class="form-control" id="amount" step="0.01" min="0" required>
+                        <div class="input-group">
+                            <span class="input-group-text">€</span>
+                            <input type="number" class="form-control" id="amount" step="0.01" min="0" required>
+                        </div>
                     </div>
                     <div class="col-md-2">
                         <label for="category" class="form-label">Categoría</label>
@@ -462,6 +466,45 @@
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
                     <button type="button" class="btn btn-primary" id="btnSaveAiSettings">Guardar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Configurar Moneda -->
+    <div class="modal fade" id="currencySettingsModal" tabindex="-1" aria-labelledby="currencySettingsModalLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="currencySettingsModalLabel">⚙️ Ajustes de moneda</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="text-muted small mb-3">Elegí la moneda de visualización y la tasa manual. Los montos se guardan siempre en EUR y se convierten solo al mostrarse.</p>
+
+                    <div class="mb-3">
+                        <label for="currencySelect" class="form-label">Moneda de visualización</label>
+                        <select id="currencySelect" class="form-select">
+                            <option value="EUR">EUR (€) — Euro</option>
+                            <option value="USD">USD ($) — Dólar</option>
+                            <option value="GBP">GBP (£) — Libra</option>
+                            <option value="ARS">ARS ($) — Peso argentino</option>
+                            <option value="MXN">MXN ($) — Peso mexicano</option>
+                            <option value="BRL">BRL (R$) — Real brasileño</option>
+                            <option value="JPY">JPY (¥) — Yen japonés</option>
+                            <option value="CHF">CHF — Franco suizo</option>
+                        </select>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="currencyRate" class="form-label">Tasa (1 EUR = X)</label>
+                        <input type="number" id="currencyRate" class="form-control" step="any" min="0.0001" placeholder="1 EUR = X">
+                        <div class="form-text">EUR es la moneda base y no requiere tasa. Para las demás, ingresá cuántas unidades equivalen a 1 EUR (p. ej. 1.1 o 1200).</div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="button" class="btn btn-primary" id="btnSaveCurrencySettings">Guardar</button>
                 </div>
             </div>
         </div>

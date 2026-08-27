@@ -82,6 +82,29 @@ async function loadAiSettingsFromStorage() {
     }
 }
 
+// --- Moneda de visualización ---------------------------------------
+
+// Único punto de conmutación para sitios de DISPLAY: formatea `n` en la
+// moneda de visualización activa (lee la config cacheada dentro de formatAmount).
+// Los sitios de prompt de IA y las celdas numéricas de Excel NO usan fmt()
+// (permanecen en EUR base por NFR).
+function fmt(n) {
+    return formatAmount(n);
+}
+
+// Carga las preferencias de moneda desde storage al arrancar y aplica la
+// config de visualización activa sobre el cache de finance. Sin ajustes
+// guardados deja la salida EUR/es-ES byte-idéntica al legacy.
+async function loadCurrencySettingsFromStorage() {
+    try {
+        const s = await storage.loadCurrencySettings();
+        setDisplayConfig(s ? { displayCurrency: s.displayCurrency, rate: s.rates?.[s.displayCurrency] } : null);
+    } catch (err) {
+        console.error('No se pudieron leer las configuraciones de moneda.', err);
+        setDisplayConfig(null); // EUR por defecto — byte-idéntico
+    }
+}
+
 // --- Modal gestionar categorías ------------------------------------
 
 function renderCustomCategoryGroup(tipo) {
@@ -343,6 +366,95 @@ function setupAiSettingsModal() {
         bootstrap.Modal.getInstance(modalEl).hide();
         toast.showSuccess('Configuración de IA guardada.');
     });
+}
+
+// --- Modal configurar moneda de visualización ----------------------
+
+function setupCurrencySettingsModal() {
+    const modalEl = document.getElementById('currencySettingsModal');
+    if (!modalEl) return;
+
+    const currencySelect = document.getElementById('currencySelect');
+    const rateInput = document.getElementById('currencyRate');
+    const btnSave = document.getElementById('btnSaveCurrencySettings');
+
+    // Record de la última vez que se guardó una tasa por código, para
+    // repoblar el campo rate al cambiar de moneda sin haber guardado.
+    let lastRates = {};
+
+    // Prefill desde la config activa al abrir; carga además el último
+    // conjunto de tasas guardadas para repoblar al alternar moneda.
+    modalEl.addEventListener('shown.bs.modal', async () => {
+        const active = getActiveFormat();
+        try {
+            const saved = await storage.loadCurrencySettings();
+            lastRates = (saved && saved.rates && typeof saved.rates === 'object') ? saved.rates : {};
+        } catch {
+            lastRates = {};
+        }
+
+        currencySelect.value = active.displayCurrency;
+        if (active.displayCurrency === 'EUR') {
+            rateInput.disabled = true;
+            rateInput.value = '';
+            rateInput.placeholder = 'EUR no requiere tasa';
+        } else {
+            rateInput.disabled = false;
+            const last = lastRates[active.displayCurrency];
+            rateInput.value = (last && last > 0) ? last : active.rate;
+            rateInput.placeholder = '1 EUR = X';
+        }
+    });
+
+    // Cambio de moneda: repoblar la tasa desde el último valor conocido.
+    currencySelect.addEventListener('change', () => {
+        const code = currencySelect.value;
+        if (code === 'EUR') {
+            rateInput.disabled = true;
+            rateInput.value = '';
+        } else {
+            rateInput.disabled = false;
+            const last = lastRates[code];
+            rateInput.value = (last && last > 0) ? last : '';
+        }
+    });
+
+    // Guardar: valida rate > 0 antes de persistir y re-renderizar.
+    btnSave.addEventListener('click', async () => {
+        const displayCurrency = currencySelect.value;
+        if (displayCurrency === 'EUR') {
+            // EUR es la base: tasa implícita 1, sin necesidad de input.
+            await saveAndApply({ displayCurrency, rate: 1 });
+            return;
+        }
+
+        const rate = Number(rateInput.value);
+        if (!(rate > 0)) {
+            toast.showError('La tasa tiene que ser mayor a 0.');
+            return; // modal permanece abierto, nada se persiste
+        }
+        await saveAndApply({ displayCurrency, rate });
+    });
+
+    async function saveAndApply({ displayCurrency, rate }) {
+        const record = {
+            baseCurrency: 'EUR',
+            displayCurrency,
+            rates: { ...lastRates, [displayCurrency]: rate }
+        };
+        try {
+            await storage.saveCurrencySettings(record);
+        } catch (err) {
+            console.error('No se pudieron guardar las configuraciones de moneda.', err);
+            toast.showError('No se pudo guardar la moneda.');
+            return;
+        }
+        setDisplayConfig({ displayCurrency, rate });
+        lastRates = record.rates;
+        render();
+        bootstrap.Modal.getInstance(modalEl).hide();
+        toast.showSuccess('Moneda de visualización actualizada.');
+    }
 }
 
 // --- Auto-categorización con IA --------------------------------------
@@ -688,7 +800,7 @@ function renderTable() {
         // Celda de monto: editable si edición inline activa
         const montoCell = isRowEdit || (isSingleField && inlineEditField === 'monto')
             ? renderEditableCell(e, 'monto', e.monto)
-            : `${isIncome ? '+' : '-'}${formatAmount(e.monto)}`;
+            : `${isIncome ? '+' : '-'}${fmt(e.monto)}`;
 
         // Clases para celdas en modo edición inline
         const editCls = isInlineEditing ? ' inline-editing' : '';
@@ -718,16 +830,16 @@ function renderSummary() {
     const filtered = getFilteredEntries();
     const { totalIncome, totalExpenses, totalSavings, balance } = calculateBalance(filtered);
 
-    document.getElementById('totalIncome').textContent = formatAmount(totalIncome);
-    document.getElementById('totalExpenses').textContent = formatAmount(totalExpenses);
-    document.getElementById('totalSavings').textContent = formatAmount(totalSavings);
+    document.getElementById('totalIncome').textContent = fmt(totalIncome);
+    document.getElementById('totalExpenses').textContent = fmt(totalExpenses);
+    document.getElementById('totalSavings').textContent = fmt(totalSavings);
 
     const balanceEl = document.getElementById('totalBalance');
-    balanceEl.textContent = formatAmount(Math.abs(balance));
+    balanceEl.textContent = fmt(Math.abs(balance));
     balanceEl.parentElement.className = 'card text-bg-' + (balance >= 0 ? 'success' : 'danger') + ' shadow-sm';
 
     document.getElementById('totalHeader').textContent =
-        'Balance: ' + (balance >= 0 ? '' : '-') + formatAmount(Math.abs(balance));
+        'Balance: ' + (balance >= 0 ? '' : '-') + fmt(Math.abs(balance));
 }
 
 // --- Render: Gráficos ---------------------------------------------
@@ -849,8 +961,8 @@ function renderDashboard() {
     const projection = calculateProjection(entries, currentMonth);
     const comparison = calculateComparison(entries, currentMonth);
 
-    document.getElementById('dashAvgDaily').textContent = formatAmount(avg);
-    document.getElementById('dashProjection').textContent = formatAmount(projection);
+    document.getElementById('dashAvgDaily').textContent = fmt(avg);
+    document.getElementById('dashProjection').textContent = fmt(projection);
 
     // Comparativa
     const compEl = document.getElementById('dashComparison');
@@ -858,7 +970,7 @@ function renderDashboard() {
         compEl.textContent = '—';
         compEl.className = 'h4 mb-0 text-muted';
     } else if (comparison.prevExpenses === 0) {
-        compEl.textContent = formatAmount(comparison.currentExpenses);
+        compEl.textContent = fmt(comparison.currentExpenses);
         compEl.className = 'h4 mb-0 text-danger';
     } else {
         const sign = comparison.delta >= 0 ? '+' : '';
@@ -1071,7 +1183,7 @@ function renderTrendChart() {
                 legend: { position: 'bottom', labels: { color: textColor } },
                 tooltip: {
                     callbacks: {
-                        label: (context) => `${context.dataset.label}: ${formatAmount(context.raw)}`
+                        label: (context) => `${context.dataset.label}: ${fmt(context.raw)}`
                     }
                 }
             },
@@ -1079,7 +1191,7 @@ function renderTrendChart() {
                 x: { grid: { color: gridColor }, ticks: { color: textColor } },
                 y: {
                     grid: { color: gridColor },
-                    ticks: { color: textColor, callback: v => formatAmount(v) },
+                    ticks: { color: textColor, callback: v => fmt(v) },
                     beginAtZero: true
                 }
             }
@@ -1128,7 +1240,7 @@ function renderBudgets() {
                     <div class="progress mb-1" style="height: 8px;">
                         <div class="progress-bar ${badgeClass}" role="progressbar" style="width: ${Math.min(pct, 100)}%"></div>
                     </div>
-                    <small class="text-muted">${formatAmount(p.actual)} / ${formatAmount(p.presupuesto)} (${pct}%)</small>
+                    <small class="text-muted">${fmt(p.actual)} / ${fmt(p.presupuesto)} (${pct}%)</small>
                 </div>
             </div>
         </div>`;
@@ -1222,7 +1334,7 @@ function renderRecurring() {
                         <span class="badge ${activoBadge}">${activoText}</span>
                     </div>
                     <h6 class="mb-1">${escapeHTML(r.descripcion)}</h6>
-                    <small class="text-muted">${escapeHTML(r.categoria)} • Día ${r.diaMes} • ${formatAmount(r.monto)}</small>
+                    <small class="text-muted">${escapeHTML(r.categoria)} • Día ${r.diaMes} • ${fmt(r.monto)}</small>
                     <div class="btn-group btn-group-sm mt-2 w-100">
                         <button type="button" class="btn btn-outline-secondary toggle-recurring" data-id="${r.id}" data-activo="${r.activo}">
                             ${r.activo ? 'Pausar' : 'Activar'}
@@ -1382,7 +1494,7 @@ function exportXLSX() {
         'Tipo': '',
         'Categoría': 'TOTALES',
         'Subcategoría': '',
-        'Descripción': `Ingresos: ${formatAmount(totals.totalIncome)} | Gastos: ${formatAmount(totals.totalExpenses)} | Ahorros: ${formatAmount(totals.totalSavings)}`,
+        'Descripción': `Ingresos: ${fmt(totals.totalIncome)} | Gastos: ${fmt(totals.totalExpenses)} | Ahorros: ${fmt(totals.totalSavings)}`,
         'Monto': totals.balance
     });
 
@@ -1495,6 +1607,7 @@ async function init() {
     await loadRecurring();
     await loadCustomCategoriesFromStorage();
     await loadAiSettingsFromStorage();
+    await loadCurrencySettingsFromStorage();
     await checkAndGenerateRecurring();
 
     // Fecha de hoy por defecto
@@ -1514,6 +1627,7 @@ async function init() {
     setupRecurringModal();
     setupManageCategoriesModal();
     setupAiSettingsModal();
+    setupCurrencySettingsModal();
 
     // Submit del formulario (alta o edición)
     document.getElementById('expenseForm').addEventListener('submit', (e) => {
