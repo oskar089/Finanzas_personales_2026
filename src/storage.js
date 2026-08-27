@@ -6,17 +6,19 @@
 // =====================================================================
 
 const DB_NAME = 'finanzas_personales_2026';
-const DB_VERSION = 5; // v3: añadido store recurring | v4: añadido store customCategories | v5: añadido store aiSettings
+const DB_VERSION = 6; // v3: añadido store recurring | v4: añadido store customCategories | v5: añadido store aiSettings | v6: añadido store settings
 const STORE_NAME = 'entries';
 const BUDGETS_STORE = 'budgets';
 const RECURRING_STORE = 'recurring';
 const CUSTOM_CATEGORIES_STORE = 'customCategories';
 const AI_SETTINGS_STORE = 'aiSettings';
+const SETTINGS_STORE = 'settings';
 const LS_KEY = 'finanzas:gastos:v1';
 const LS_BUDGETS_KEY = 'finanzas:budgets:v1';
 const LS_RECURRING_KEY = 'finanzas:recurring:v1';
 const LS_CUSTOM_CATEGORIES_KEY = 'finanzas:custom-categories:v1';
 const LS_AI_SETTINGS_KEY = 'finanzas:ai-settings:v1';
+const LS_SETTINGS_KEY = 'finanzas:settings:v1';
 const LS_MIGRATED_KEY = 'finanzas:migrated';
 
 // --- Detección de soporte -------------------------------------------
@@ -51,6 +53,9 @@ function openDB() {
             }
             if (!db.objectStoreNames.contains(AI_SETTINGS_STORE)) {
                 db.createObjectStore(AI_SETTINGS_STORE, { keyPath: 'id' });
+            }
+            if (!db.objectStoreNames.contains(SETTINGS_STORE)) {
+                db.createObjectStore(SETTINGS_STORE, { keyPath: 'id' });
             }
         };
 
@@ -207,6 +212,28 @@ function idbPutAiSettings(db, settings) {
     });
 }
 
+// --- Currency settings helpers -----------------------------------------
+
+function idbGetSettings(db) {
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(SETTINGS_STORE, 'readonly');
+        const store = tx.objectStore(SETTINGS_STORE);
+        const request = store.get('active');
+        request.onsuccess = () => resolve(request.result || null);
+        request.onerror = () => reject(request.error);
+    });
+}
+
+function idbPutSettings(db, settings) {
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(SETTINGS_STORE, 'readwrite');
+        const store = tx.objectStore(SETTINGS_STORE);
+        store.put(settings);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+    });
+}
+
 // --- localStorage fallback -------------------------------------------
 
 function lsLoad() {
@@ -294,6 +321,21 @@ function lsLoadAiSettings() {
 
 function lsSaveAiSettings(settings) {
     localStorage.setItem(LS_AI_SETTINGS_KEY, JSON.stringify(settings));
+}
+
+function lsLoadSettings() {
+    try {
+        const raw = localStorage.getItem(LS_SETTINGS_KEY);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        return parsed && typeof parsed === 'object' ? parsed : null;
+    } catch {
+        return null;
+    }
+}
+
+function lsSaveSettings(settings) {
+    localStorage.setItem(LS_SETTINGS_KEY, JSON.stringify(settings));
 }
 
 // --- Migración localStorage → IndexedDB ----------------------------
@@ -523,13 +565,86 @@ async function saveAiSettings(settings) {
     }
 }
 
+// --- Currency Settings API ---------------------------------------------
+
+async function loadCurrencySettings() {
+    if (!isIDBAvailable()) {
+        return lsLoadSettings();
+    }
+
+    try {
+        const db = await openDB();
+        return await idbGetSettings(db);
+    } catch {
+        return lsLoadSettings();
+    }
+}
+
+async function saveCurrencySettings(settings) {
+    if (!settings) {
+        // Clear settings
+        if (!isIDBAvailable()) {
+            localStorage.removeItem(LS_SETTINGS_KEY);
+            return;
+        }
+        try {
+            const db = await openDB();
+            const tx = db.transaction(SETTINGS_STORE, 'readwrite');
+            tx.objectStore(SETTINGS_STORE).delete('active');
+            await new Promise((resolve, reject) => {
+                tx.oncomplete = resolve;
+                tx.onerror = () => reject(tx.error);
+            });
+        } catch {
+            // ignore
+        }
+        localStorage.removeItem(LS_SETTINGS_KEY);
+        return;
+    }
+
+    const record = { ...settings, id: 'active', updatedAt: Date.now() };
+
+    if (!isIDBAvailable()) {
+        lsSaveSettings(record);
+        return;
+    }
+
+    try {
+        const db = await openDB();
+        await idbPutSettings(db, record);
+        lsSaveSettings(record);
+    } catch {
+        lsSaveSettings(record);
+    }
+}
+
+async function clearCurrencySettings() {
+    if (!isIDBAvailable()) {
+        localStorage.removeItem(LS_SETTINGS_KEY);
+        return;
+    }
+
+    try {
+        const db = await openDB();
+        const tx = db.transaction(SETTINGS_STORE, 'readwrite');
+        tx.objectStore(SETTINGS_STORE).delete('active');
+        await new Promise((resolve, reject) => {
+            tx.oncomplete = resolve;
+            tx.onerror = () => reject(tx.error);
+        });
+    } catch {
+        // ignore
+    }
+    localStorage.removeItem(LS_SETTINGS_KEY);
+}
+
 // --- Exports ---------------------------------------------------------
 
 // Soporte tanto para Node.js (vitest) como navegador
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { load, save, clear, loadBudgets, saveBudgets, loadRecurring, saveRecurring, loadCustomCategories, saveCustomCategories, loadAiSettings, saveAiSettings, isIDBAvailable };
+    module.exports = { load, save, clear, loadBudgets, saveBudgets, loadRecurring, saveRecurring, loadCustomCategories, saveCustomCategories, loadAiSettings, saveAiSettings, loadCurrencySettings, saveCurrencySettings, clearCurrencySettings, isIDBAvailable };
 }
 
 if (typeof window !== 'undefined') {
-    window.storage = { load, save, clear, loadBudgets, saveBudgets, loadRecurring, saveRecurring, loadCustomCategories, saveCustomCategories, loadAiSettings, saveAiSettings };
+    window.storage = { load, save, clear, loadBudgets, saveBudgets, loadRecurring, saveRecurring, loadCustomCategories, saveCustomCategories, loadAiSettings, saveAiSettings, loadCurrencySettings, saveCurrencySettings, clearCurrencySettings };
 }

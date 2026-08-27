@@ -794,3 +794,125 @@ describe('mergeCategories()', () => {
         expect(result).toEqual(['Comida', 'Mascotas']);
     });
 });
+
+// -------------------------------------------------------------------
+// Catálogo de monedas (CURRENCIES)
+// -------------------------------------------------------------------
+describe('CURRENCIES catalog', () => {
+    it('mapea las 8 monedas curadas a su locale y decimales', () => {
+        expect(finance.CURRENCIES).toBeDefined();
+        expect(finance.CURRENCIES.EUR).toEqual({ locale: 'es-ES', decimals: 2 });
+        expect(finance.CURRENCIES.USD).toEqual({ locale: 'en-US', decimals: 2 });
+        expect(finance.CURRENCIES.GBP).toEqual({ locale: 'en-GB', decimals: 2 });
+        expect(finance.CURRENCIES.ARS).toEqual({ locale: 'es-AR', decimals: 2 });
+        expect(finance.CURRENCIES.MXN).toEqual({ locale: 'es-MX', decimals: 2 });
+        expect(finance.CURRENCIES.BRL).toEqual({ locale: 'pt-BR', decimals: 2 });
+        expect(finance.CURRENCIES.JPY).toEqual({ locale: 'ja-JP', decimals: 0 });
+        expect(finance.CURRENCIES.CHF).toEqual({ locale: 'de-CH', decimals: 2 });
+    });
+});
+
+// -------------------------------------------------------------------
+// getActiveFormat() / setDisplayConfig()
+// -------------------------------------------------------------------
+describe('getActiveFormat() / setDisplayConfig()', () => {
+    it('getActiveFormat() por defecto es EUR con rate 1, locale es-ES, decimals 2', () => {
+        finance.setDisplayConfig(null);
+        const f = finance.getActiveFormat();
+        expect(f.displayCurrency).toBe('EUR');
+        expect(f.rate).toBe(1);
+        expect(f.locale).toBe('es-ES');
+        expect(f.decimals).toBe(2);
+    });
+
+    it('setDisplayConfig normaliza código desconocido a EUR y rate inválido a 1', () => {
+        finance.setDisplayConfig({ displayCurrency: 'XXX', rate: -5 });
+        const f = finance.getActiveFormat();
+        expect(f.displayCurrency).toBe('EUR');
+        expect(f.rate).toBe(1);
+        expect(f.locale).toBe('es-ES');
+        // Reset para no contaminar otros tests
+        finance.setDisplayConfig(null);
+    });
+
+    it('setDisplayConfig aplica la moneda y rate válidos', () => {
+        finance.setDisplayConfig({ displayCurrency: 'USD', rate: 1.1 });
+        const f = finance.getActiveFormat();
+        expect(f.displayCurrency).toBe('USD');
+        expect(f.rate).toBe(1.1);
+        expect(f.locale).toBe('en-US');
+        finance.setDisplayConfig(null);
+    });
+});
+
+// -------------------------------------------------------------------
+// convertAmount()
+// -------------------------------------------------------------------
+describe('convertAmount()', () => {
+    it('convierte amount * rate', () => {
+        expect(finance.convertAmount(1500, 1.1)).toBe(1650);
+    });
+
+    it('rate 0 pasa el monto sin cambios (passthrough)', () => {
+        expect(finance.convertAmount(1500, 0)).toBe(1500);
+    });
+
+    it('rate negativo pasa el monto sin cambios (passthrough)', () => {
+        expect(finance.convertAmount(1500, -1)).toBe(1500);
+    });
+
+    it('rate NaN pasa el monto sin cambios (passthrough)', () => {
+        expect(finance.convertAmount(1500, NaN)).toBe(1500);
+    });
+});
+
+// -------------------------------------------------------------------
+// formatAmount() con opts (moneda + rate) — valores exactos
+// -------------------------------------------------------------------
+describe('formatAmount() con moneda explícita', () => {
+    it('USD con rate 1.1 formatea 1500 → $1,650.00 (en-US)', () => {
+        expect(finance.formatAmount(1500, { currency: 'USD', rate: 1.1 })).toBe('$1,650.00');
+    });
+
+    it('JPY con rate 1 formatea 1650 sin decimales (ja-JP)', () => {
+        expect(finance.formatAmount(1650, { currency: 'JPY', rate: 1 })).toBe('￥1,650');
+    });
+});
+
+// -------------------------------------------------------------------
+// formatAmount() default: byte-identical a EUR legacy
+// -------------------------------------------------------------------
+describe('formatAmount() default (backward compat EUR)', () => {
+    beforeEach(() => {
+        finance.setDisplayConfig(null);
+    });
+
+    it('formatAmount(1500) tras reset es idéntico al legacy', () => {
+        expect(finance.formatAmount(1500)).toBe('€1500,00');
+    });
+
+    it('formatAmount(0) tras reset es €0,00', () => {
+        expect(finance.formatAmount(0)).toBe('€0,00');
+    });
+
+    it('formatAmount("500") tras reset es €500,00', () => {
+        expect(finance.formatAmount('500')).toBe('€500,00');
+    });
+});
+
+// -------------------------------------------------------------------
+// Cache: setDisplayConfig → formatAmount lee la config activa
+// -------------------------------------------------------------------
+describe('setDisplayConfig cache aplicado en formatAmount()', () => {
+    it('setDisplayConfig USD rate 1.1 → formatAmount(1500) = $1,650.00', () => {
+        finance.setDisplayConfig({ displayCurrency: 'USD', rate: 1.1 });
+        expect(finance.formatAmount(1500)).toBe('$1,650.00');
+        finance.setDisplayConfig(null);
+    });
+
+    it('reset con setDisplayConfig(null) restaura la salida EUR', () => {
+        finance.setDisplayConfig({ displayCurrency: 'USD', rate: 1.1 });
+        finance.setDisplayConfig(null);
+        expect(finance.formatAmount(1500)).toBe('€1500,00');
+    });
+});

@@ -211,3 +211,75 @@ describe('storage.saveAiSettings() / loadAiSettings()', () => {
         }
     });
 });
+
+// -------------------------------------------------------------------
+// Ajustes de moneda (currency settings) — DB v6
+// -------------------------------------------------------------------
+const sampleCurrencySettings = { baseCurrency: 'EUR', displayCurrency: 'USD', rates: { USD: 1.1 } };
+
+describe('storage: DB v6 expone el store settings (aditivo)', () => {
+    it('abre la DB v6 y expone el store settings junto a los existentes', async () => {
+        // Disparar la migración real a través del módulo storage (openDB con DB_VERSION)
+        await storage.loadAiSettings();
+        const db = await new Promise((resolve, reject) => {
+            const req = indexedDB.open('finanzas_personales_2026');
+            req.onsuccess = () => resolve(req.result);
+            req.onerror = () => reject(req.error);
+        });
+        expect(db.version).toBe(6);
+        expect(db.objectStoreNames.contains('settings')).toBe(true);
+        // Migración aditiva: los stores existentes se preservan
+        expect(db.objectStoreNames.contains('entries')).toBe(true);
+        expect(db.objectStoreNames.contains('budgets')).toBe(true);
+        expect(db.objectStoreNames.contains('recurring')).toBe(true);
+        expect(db.objectStoreNames.contains('customCategories')).toBe(true);
+        expect(db.objectStoreNames.contains('aiSettings')).toBe(true);
+    });
+});
+
+describe('storage.saveCurrencySettings() / loadCurrencySettings()', () => {
+    beforeEach(() => {
+        localStorage.removeItem('finanzas:settings:v1');
+    });
+
+    afterEach(async () => {
+        localStorage.removeItem('finanzas:settings:v1');
+        await storage.clearCurrencySettings();
+    });
+
+    it('guarda y recupera los ajustes de moneda (roundtrip)', async () => {
+        await storage.saveCurrencySettings(sampleCurrencySettings);
+        const result = await storage.loadCurrencySettings();
+        expect(result.baseCurrency).toBe('EUR');
+        expect(result.displayCurrency).toBe('USD');
+        expect(result.rates.USD).toBe(1.1);
+        expect(result.id).toBe('active');
+        expect(typeof result.updatedAt).toBe('number');
+    });
+
+    it('usa localStorage como fallback cuando IndexedDB no está disponible', async () => {
+        const original = globalThis.indexedDB;
+        globalThis.indexedDB = undefined;
+        try {
+            await storage.saveCurrencySettings(sampleCurrencySettings);
+            // Debe haberse escrito en localStorage, no en IndexedDB
+            const raw = JSON.parse(localStorage.getItem('finanzas:settings:v1'));
+            expect(raw.displayCurrency).toBe('USD');
+            expect(raw.rates.USD).toBe(1.1);
+
+            const loaded = await storage.loadCurrencySettings();
+            expect(loaded.displayCurrency).toBe('USD');
+            expect(loaded.rates.USD).toBe(1.1);
+        } finally {
+            globalThis.indexedDB = original;
+        }
+    });
+
+    it('clear elimina del store y de localStorage', async () => {
+        await storage.saveCurrencySettings(sampleCurrencySettings);
+        await storage.clearCurrencySettings();
+        const loaded = await storage.loadCurrencySettings();
+        expect(loaded).toBeNull();
+        expect(localStorage.getItem('finanzas:settings:v1')).toBeNull();
+    });
+});

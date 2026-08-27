@@ -25,6 +25,50 @@ const INCOME_CATEGORIES = [
     'Varios'
 ];
 
+// --- Catálogo de monedas -------------------------------------------
+
+const CURRENCIES = {
+    EUR: { locale: 'es-ES', decimals: 2 },
+    USD: { locale: 'en-US', decimals: 2 },
+    GBP: { locale: 'en-GB', decimals: 2 },
+    ARS: { locale: 'es-AR', decimals: 2 },
+    MXN: { locale: 'es-MX', decimals: 2 },
+    BRL: { locale: 'pt-BR', decimals: 2 },
+    JPY: { locale: 'ja-JP', decimals: 0 },
+    CHF: { locale: 'de-CH', decimals: 2 },
+};
+
+const BASE_CURRENCY = 'EUR';
+
+// Config por defecto: sin ajustes ⇒ salida € + es-ES idéntica al legacy.
+const DEFAULT_FORMAT = { displayCurrency: 'EUR', rate: 1, locale: 'es-ES', decimals: 2 };
+
+// Cache de la config activa en memoria (lector síncrono para el formateador síncrono).
+let activeFormat = { ...DEFAULT_FORMAT };
+
+function setDisplayConfig(config) {
+    // Normaliza contra el catálogo: código desconocido ⇒ EUR, rate ≤ 0 ⇒ 1.
+    const cur = CURRENCIES[config?.displayCurrency] || CURRENCIES.EUR;
+    activeFormat = {
+        displayCurrency: CURRENCIES[config?.displayCurrency] ? config.displayCurrency : 'EUR',
+        rate: Number(config?.rate) > 0 ? Number(config.rate) : 1,
+        locale: cur.locale,
+        decimals: cur.decimals,
+    };
+}
+
+function getActiveFormat() {
+    return activeFormat;
+}
+
+// Pura: amount * rate. rate ≤ 0 o NaN ⇒ passthrough (rate 1, equivale a EUR).
+// Redondea a 9 decimales para eliminar el ruido de coma flotante (p. ej. 1500 * 1.1),
+// sin afectar fracciones legítimas (nunca hay más de ~4 decimales en montos reales).
+function convertAmount(amount, rate) {
+    const r = Number(rate);
+    return Math.round(Number(amount) * (r > 0 ? r : 1) * 1e9) / 1e9;
+}
+
 // --- Funciones puras ----------------------------------------------
 
 function getAllCategories() {
@@ -59,13 +103,33 @@ function escapeHTML(str) {
         .replace(/'/g, '&#39;');
 }
 
-function formatAmount(n) {
-    // Formato europeo: separador de miles con punto, decimales con coma.
+function formatAmount(n, opts = {}) {
+    // Formatea un monto en la moneda de visualización activa.
+    // - Sin opts: usa la config cacheada (activeFormat). Sin ajustes guardados
+    //   la salida es byte-idéntica al legacy '€' + es-ES.
+    // - Con opts.currency: override explícito { currency, rate } (para tests / usos puntuales).
+    const cfg = opts.currency
+        ? { displayCurrency: opts.currency, rate: Number(opts.rate) > 0 ? Number(opts.rate) : 1, ...CURRENCIES[opts.currency] }
+        : activeFormat;
+
     const num = Number(n);
-    if (isNaN(num)) return '€0,00';
-    return '€' + num.toLocaleString('es-ES', {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2
+
+    // Ruta legacy byte-idéntica: EUR + es-ES (fijada al string builder original).
+    if (cfg.displayCurrency === 'EUR' && cfg.locale === 'es-ES') {
+        if (isNaN(num)) return '€0,00';
+        return '€' + num.toLocaleString('es-ES', {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2
+        });
+    }
+
+    // Ruta Intl para monedas no-EUR: convierte desde base (EUR) y aplica locale.
+    const converted = convertAmount(isNaN(num) ? 0 : num, cfg.rate);
+    return converted.toLocaleString(cfg.locale, {
+        style: 'currency',
+        currency: cfg.displayCurrency,
+        minimumFractionDigits: cfg.decimals,
+        maximumFractionDigits: cfg.decimals
     });
 }
 
@@ -367,7 +431,13 @@ if (typeof module !== 'undefined' && module.exports) {
         calculateBudgetProgress,
         calculateMonthlyTrend,
         generateRecurringEntries,
-        parseEntryFromRow
+        parseEntryFromRow,
+        CURRENCIES,
+        BASE_CURRENCY,
+        DEFAULT_FORMAT,
+        convertAmount,
+        setDisplayConfig,
+        getActiveFormat
     };
 }
 
@@ -394,4 +464,10 @@ if (typeof window !== 'undefined') {
     window.calculateMonthlyTrend = calculateMonthlyTrend;
     window.generateRecurringEntries = generateRecurringEntries;
     window.parseEntryFromRow = parseEntryFromRow;
+    window.CURRENCIES = CURRENCIES;
+    window.BASE_CURRENCY = BASE_CURRENCY;
+    window.DEFAULT_FORMAT = DEFAULT_FORMAT;
+    window.convertAmount = convertAmount;
+    window.setDisplayConfig = setDisplayConfig;
+    window.getActiveFormat = getActiveFormat;
 }
