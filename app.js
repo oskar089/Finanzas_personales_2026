@@ -377,10 +377,39 @@ function setupCurrencySettingsModal() {
     const currencySelect = document.getElementById('currencySelect');
     const rateInput = document.getElementById('currencyRate');
     const btnSave = document.getElementById('btnSaveCurrencySettings');
+    const btnFetch = document.getElementById('btnFetchLiveRate');
 
     // Record de la última vez que se guardó una tasa por código, para
     // repoblar el campo rate al cambiar de moneda sin haber guardado.
     let lastRates = {};
+
+    // Sincroniza el estado del input de tasa y del botón "Actualizar tasas"
+    // según la moneda seleccionada: EUR (base, sin tasa) oculta/deshabilita ambos.
+    function updateRateControls() {
+        const isEUR = currencySelect.value === 'EUR';
+        rateInput.disabled = isEUR;
+        btnFetch.disabled = isEUR;
+        btnFetch.style.display = isEUR ? 'none' : '';
+    }
+
+    // Trae la tasa live EUR → moneda desde Frankfurter. Rechaza (lanza) ante
+    // cualquier fallo: red, timeout, parseo o error del API. Nunca toca storage.
+    async function fetchLiveRate(code) {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 8000);
+        try {
+            const res = await fetch(`https://api.frankfurter.app/latest?from=EUR&to=${code}`, {
+                signal: controller.signal
+            });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+            const rate = parseRateResponse(data, code); // helper puro, desde finance.js
+            if (!rate) throw new Error('tasa no disponible');
+            return rate;
+        } finally {
+            clearTimeout(timer);
+        }
+    }
 
     // Prefill desde la config activa al abrir; carga además el último
     // conjunto de tasas guardadas para repoblar al alternar moneda.
@@ -395,27 +424,49 @@ function setupCurrencySettingsModal() {
 
         currencySelect.value = active.displayCurrency;
         if (active.displayCurrency === 'EUR') {
-            rateInput.disabled = true;
             rateInput.value = '';
             rateInput.placeholder = 'EUR no requiere tasa';
         } else {
-            rateInput.disabled = false;
             const last = lastRates[active.displayCurrency];
             rateInput.value = (last && last > 0) ? last : active.rate;
             rateInput.placeholder = '1 EUR = X';
         }
+        updateRateControls();
     });
 
     // Cambio de moneda: repoblar la tasa desde el último valor conocido.
     currencySelect.addEventListener('change', () => {
         const code = currencySelect.value;
         if (code === 'EUR') {
-            rateInput.disabled = true;
             rateInput.value = '';
         } else {
-            rateInput.disabled = false;
             const last = lastRates[code];
             rateInput.value = (last && last > 0) ? last : '';
+        }
+        updateRateControls();
+    });
+
+    // "Actualizar tasas": precarga la tasa live como valor EDITABLE. Nunca
+    // persiste ni bloquea: en caso de fallo muestra error y conserva lo manual.
+    btnFetch.addEventListener('click', async () => {
+        const code = currencySelect.value;
+        if (code === 'EUR') return; // guardia: EUR no tiene tasa
+
+        const originalText = btnFetch.textContent;
+        btnFetch.disabled = true;
+        btnFetch.textContent = '↻ Actualizando…';
+        try {
+            const rate = await fetchLiveRate(code);
+            if (!(rate > 0)) throw new Error('tasa inválida');
+            rateInput.value = rate;
+            lastRates[code] = rate;
+            toast.showSuccess('Tasa actualizada: 1 EUR = ' + rate + ' ' + code);
+        } catch (err) {
+            console.error('No se pudo obtener la tasa live.', err);
+            toast.showError('No se pudo actualizar la tasa. Se mantiene la manual.');
+        } finally {
+            btnFetch.textContent = originalText;
+            updateRateControls(); // restaura disabled según moneda
         }
     });
 

@@ -69,6 +69,17 @@ function convertAmount(amount, rate) {
     return Math.round(Number(amount) * (r > 0 ? r : 1) * 1e9) / 1e9;
 }
 
+// Pura: valida el envoltorio JSON de Frankfurter ({ rates: { CAD: 1.5 } })
+// para una moneda destino dada. Retorna la tasa como número si es finita y
+// > 0; retorna null si el envoltorio es inválido o la tasa falta/es inválida.
+function parseRateResponse(json, code) {
+    if (!json || typeof json !== 'object' || !json.rates || typeof json.rates !== 'object') {
+        return null;
+    }
+    const rate = Number(json.rates[code]);
+    return (isFinite(rate) && rate > 0) ? rate : null;
+}
+
 // --- Funciones puras ----------------------------------------------
 
 function getAllCategories() {
@@ -449,7 +460,8 @@ if (typeof module !== 'undefined' && module.exports) {
         DEFAULT_FORMAT,
         convertAmount,
         setDisplayConfig,
-        getActiveFormat
+        getActiveFormat,
+        parseRateResponse
     };
 }
 
@@ -483,4 +495,5 @@ if (typeof window !== 'undefined') {
     window.convertAmount = convertAmount;
     window.setDisplayConfig = setDisplayConfig;
     window.getActiveFormat = getActiveFormat;
+    window.parseRateResponse = parseRateResponse;
 }

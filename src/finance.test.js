@@ -957,6 +957,34 @@ describe('formatAmount() default (backward compat EUR)', () => {
 });
 
 // -------------------------------------------------------------------
+// parseRateResponse() — valida el envoltorio de Frankfurter
+// -------------------------------------------------------------------
+describe('parseRateResponse()', () => {
+    it('extrae la tasa válida del envoltorio de Frankfurter', () => {
+        expect(finance.parseRateResponse({ rates: { USD: 1.1 } }, 'USD')).toBe(1.1);
+        expect(finance.parseRateResponse({ rates: { ARS: 1200.5 } }, 'ARS')).toBe(1200.5);
+    });
+
+    it('retorna null si el envoltorio no tiene rates', () => {
+        expect(finance.parseRateResponse(null, 'USD')).toBeNull();
+        expect(finance.parseRateResponse(undefined, 'USD')).toBeNull();
+        expect(finance.parseRateResponse({ base: 'EUR' }, 'USD')).toBeNull();
+        expect(finance.parseRateResponse('no soy objeto', 'USD')).toBeNull();
+    });
+
+    it('retorna null si falta la moneda destino en rates', () => {
+        expect(finance.parseRateResponse({ rates: { GBP: 0.85 } }, 'USD')).toBeNull();
+    });
+
+    it('retorna null si la tasa es no numérica, 0 o negativa', () => {
+        expect(finance.parseRateResponse({ rates: { USD: 'abc' } }, 'USD')).toBeNull();
+        expect(finance.parseRateResponse({ rates: { USD: 0 } }, 'USD')).toBeNull();
+        expect(finance.parseRateResponse({ rates: { USD: -1 } }, 'USD')).toBeNull();
+        expect(finance.parseRateResponse({ rates: { USD: Infinity } }, 'USD')).toBeNull();
+    });
+});
+
+// -------------------------------------------------------------------
 // Cache: setDisplayConfig → formatAmount lee la config activa
 // -------------------------------------------------------------------
 describe('setDisplayConfig cache aplicado en formatAmount()', () => {

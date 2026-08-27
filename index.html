@@ -499,7 +499,8 @@
                     <div class="mb-3">
                         <label for="currencyRate" class="form-label">Tasa (1 EUR = X)</label>
                         <input type="number" id="currencyRate" class="form-control" step="any" min="0.0001" placeholder="1 EUR = X">
-                        <div class="form-text">EUR es la moneda base y no requiere tasa. Para las demás, ingresá cuántas unidades equivalen a 1 EUR (p. ej. 1.1 o 1200).</div>
+                        <button type="button" id="btnFetchLiveRate" class="btn btn-outline-primary btn-sm mt-2">↻ Actualizar tasas</button>
+                        <div class="form-text">EUR es la moneda base y no requiere tasa. Para las demás, ingresá cuántas unidades equivalen a 1 EUR (p. ej. 1.1 o 1200). Podés cargar la tasa actualizada al instante y ajustarla antes de guardar.</div>
                     </div>
                 </div>
                 <div class="modal-footer">
