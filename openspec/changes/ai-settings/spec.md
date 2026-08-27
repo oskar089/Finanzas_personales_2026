@@ -37,14 +37,14 @@ The system MUST present a settings modal allowing users to select an AI provider
 
 ### Requirement: Provider Adapter Layer
 
-The system MUST use a unified adapter pattern where each provider implements `chatCompletion()` accepting OpenAI-format messages and returning OpenAI-format responses.
+The system MUST use a unified adapter pattern where each provider implements `chatCompletion()` accepting OpenAI-format messages and returning a normalized `{ text }` wrapper (adapters read provider-native fields internally before wrapping).
 
 #### Scenario: Local provider chat completion
 
 - GIVEN the active provider is "Local (OpenAI-compatible)" with baseUrl "http://localhost:11434"
 - WHEN `chatCompletion({ model, messages })` is called
 - THEN the system POSTs to `{baseUrl}/v1/chat/completions` with `{ model, messages, stream: false }`
-- AND the response matches OpenAI chat completion format
+- AND the response is normalized into the `{ text }` wrapper
 
 #### Scenario: Gemini API format translation
 
@@ -52,14 +52,14 @@ The system MUST use a unified adapter pattern where each provider implements `ch
 - WHEN `chatCompletion({ model, messages })` is called
 - THEN the system translates messages to Gemini `generateContent` format
 - AND sends POST to `https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={apiKey}`
-- AND translates the response back to OpenAI chat completion format
+- AND translates the response back into the `{ text }` wrapper
 
 #### Scenario: Claude API format translation
 
 - GIVEN the active provider is "Claude"
 - WHEN `chatCompletion({ model, messages })` is called
 - THEN the system sends POST to `https://api.anthropic.com/v1/messages` with headers `x-api-key` and `anthropic-version`
-- AND translates the response back to OpenAI chat completion format
+- AND translates the response back into the `{ text }` wrapper
 
 ### Requirement: Model Discovery
 

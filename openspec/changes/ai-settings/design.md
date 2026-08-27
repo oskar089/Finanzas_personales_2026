@@ -129,7 +129,7 @@ async function autoCategorize() {
     { role: 'system', content: 'Sos un asistente financiero...' },
     { role: 'user', content: `Clasificá: "${desc}" en: ${categories}` }
   ], { temperature: 0.1, max_tokens: 20 });
-  // Parse response.choices[0].message.content
+  // Response is a normalized wrapper: const text = response.text
 }
 
 // Same pattern for renderRecommendations() lines 802-812
