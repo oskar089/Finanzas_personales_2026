@@ -1037,11 +1037,11 @@ async function renderRecommendations() {
         .map(([cat, data]) => {
             const subList = Object.entries(data.subs)
                 .sort(([, a], [, b]) => b - a)
-                .map(([sub, amt]) => `${sub}: ${formatAmount(amt)}`)
+                .map(([sub, amt]) => `${sub}: ${formatAmount(amt, { currency: 'EUR' })}`)
                 .join('; ');
             return subList
-                ? `${cat} (${formatAmount(data.total)}): ${subList}`
-                : `${cat}: ${formatAmount(data.total)}`;
+                ? `${cat} (${formatAmount(data.total, { currency: 'EUR' })}): ${subList}`
+                : `${cat}: ${formatAmount(data.total, { currency: 'EUR' })}`;
         }).join('\n  ') || 'Sin datos';
 
     // Estado de presupuestos
@@ -1054,17 +1054,17 @@ async function renderRecommendations() {
 
     // Comparativa mes anterior
     const comparisonText = comparison.prevExpenses > 0
-        ? `Gastos actuales: ${formatAmount(comparison.currentExpenses)}, mes anterior: ${formatAmount(comparison.prevExpenses)} (${comparison.delta >= 0 ? '+' : ''}${comparison.percent.toFixed(1)}%)`
+        ? `Gastos actuales: ${formatAmount(comparison.currentExpenses, { currency: 'EUR' })}, mes anterior: ${formatAmount(comparison.prevExpenses, { currency: 'EUR' })} (${comparison.delta >= 0 ? '+' : ''}${comparison.percent.toFixed(1)}%)`
         : 'Sin datos del mes anterior';
 
     // Construir prompt
     const prompt = `Sos un asistente financiero personal. Analizá estos datos y dale 3-5 consejos concretos y accionables para mejorar las finanzas del usuario. Sé directo, usa números reales, y priorizá el consejo más impactante primero.
 
 Datos del mes:
-- Ingresos: ${formatAmount(totalIncome)}
-- Gastos: ${formatAmount(totalExpenses)}
-- Balance: ${formatAmount(balance)}
-- Promedio diario: ${formatAmount(dailyAvg)}
+- Ingresos: ${formatAmount(totalIncome, { currency: 'EUR' })}
+- Gastos: ${formatAmount(totalExpenses, { currency: 'EUR' })}
+- Balance: ${formatAmount(balance, { currency: 'EUR' })}
+- Promedio diario: ${formatAmount(dailyAvg, { currency: 'EUR' })}
 - Top categorías de gasto (con desglose por subcategoría):
   ${topCategories}
 - Presupuestos: ${budgetStatus}
