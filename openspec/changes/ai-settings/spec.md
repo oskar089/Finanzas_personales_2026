@@ -114,7 +114,7 @@ The system MUST persist settings in IndexedDB with a localStorage fallback. Sett
 
 - GIVEN IndexedDB is unavailable or corrupted
 - WHEN the system loads settings
-- THEN it reads from localStorage key `aiSettings`
+- THEN it reads from localStorage key `finanzas:ai-settings:v1`
 - AND the configured provider is active
 
 ### Requirement: Backward Compatibility
@@ -133,7 +133,7 @@ The system MUST default to Ollama at `localhost:11434` with no API key when no s
 - All provider API keys MUST remain client-side (never transmitted to any third-party server beyond the provider itself)
 - Settings modal MUST be responsive and functional on mobile viewports
 - DB migration from v4 to v5 MUST be additive only (new `aiSettings` store) with zero data loss on existing stores
-- Provider adapters MUST normalize all responses to OpenAI chat completion format for downstream consumers
+- Provider adapters MUST normalize every provider response into a unified `{ text }` wrapper for downstream consumers (e.g. `app.js` reads `response.text`; adapters read provider-native fields like `choices[0].message.content` internally before wrapping)
 
 ## Out of Scope
 
