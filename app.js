@@ -1494,7 +1494,7 @@ function exportXLSX() {
         'Tipo': '',
         'Categoría': 'TOTALES',
         'Subcategoría': '',
-        'Descripción': `Ingresos: ${fmt(totals.totalIncome)} | Gastos: ${fmt(totals.totalExpenses)} | Ahorros: ${fmt(totals.totalSavings)}`,
+        'Descripción': `Ingresos: ${formatAmount(totals.totalIncome, { currency: 'EUR' })} | Gastos: ${formatAmount(totals.totalExpenses, { currency: 'EUR' })} | Ahorros: ${formatAmount(totals.totalSavings, { currency: 'EUR' })}`,
         'Monto': totals.balance
     });
 
