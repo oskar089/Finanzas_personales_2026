@@ -529,7 +529,7 @@ async function addEntry({ tipo, amount, category, subcategory, description, date
     const newEntry = {
         id: generateId(),
         tipo,
-        monto: Number(amount),
+        monto: parseAmount(amount),
         categoria: category,
         subcategoria: subcategory || '',
         descripcion: description.trim(),
@@ -543,7 +543,7 @@ async function addEntry({ tipo, amount, category, subcategory, description, date
 async function updateEntry({ id, tipo, amount, category, subcategory, description, date }) {
     entries = entries.map(e =>
         e.id === id
-            ? { ...e, tipo, monto: Number(amount), categoria: category, subcategoria: subcategory || '', descripcion: description.trim(), fecha: date }
+            ? { ...e, tipo, monto: parseAmount(amount), categoria: category, subcategoria: subcategory || '', descripcion: description.trim(), fecha: date }
             : e
     );
     await saveToStorage();
@@ -1272,8 +1272,8 @@ function setupBudgetModal() {
         inputs.forEach(input => {
             const cat = input.dataset.category;
             const val = input.value;
-            if (val && Number(val) > 0) {
-                newBudgets[cat] = Number(val);
+            if (val && parseAmount(val) > 0) {
+                newBudgets[cat] = parseAmount(val);
             }
         });
         budgets = newBudgets;
@@ -1403,7 +1403,7 @@ function setupRecurringModal() {
 
         div.querySelector('.save-recurring').onclick = async () => {
             const tipo = div.querySelector('.rec-tipo').value;
-            const monto = Number(div.querySelector('.rec-monto').value);
+            const monto = parseAmount(div.querySelector('.rec-monto').value);
             const categoria = div.querySelector('.rec-categoria').value;
             const descripcion = div.querySelector('.rec-descripcion').value.trim();
             const diaMes = Number(div.querySelector('.rec-diaMes').value);
@@ -1558,7 +1558,7 @@ function importXLSX(file) {
                     categoria: String(row['Categoría'] || row.Categoria || ''),
                     subcategoria: String(row['Subcategoría'] || row.Subcategoria || ''),
                     descripcion: String(row['Descripción'] || row.Descripcion || ''),
-                    monto: Number(row.Monto || row.monto || 0)
+                    monto: parseAmount(row.Monto || row.monto || 0)
                 };
 
                 const errors = validateEntry({

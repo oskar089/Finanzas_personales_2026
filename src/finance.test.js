@@ -329,6 +329,62 @@ describe('validateEntry()', () => {
         expect(Array.isArray(errors)).toBe(true);
         expect(errors.length).toBeGreaterThanOrEqual(1);
     });
+
+    it('amount con coma decimal es valido', () => {
+        const errors = finance.validateEntry({ ...validEntry, amount: '1500,50' });
+        expect(errors).toEqual([]);
+    });
+
+    it('amount negativo con coma decimal agrega error', () => {
+        const errors = finance.validateEntry({ ...validEntry, amount: '-50' });
+        expect(errors.length).toBeGreaterThanOrEqual(1);
+        expect(errors[0]).toMatch(/monto/i);
+    });
+});
+
+// -------------------------------------------------------------------
+// parseAmount()
+// -------------------------------------------------------------------
+describe('parseAmount()', () => {
+    it('convierte coma decimal a punto', () => {
+        expect(finance.parseAmount('1500,50')).toBe(1500.5);
+    });
+
+    it('acepta un entero sin coma', () => {
+        expect(finance.parseAmount('1500')).toBe(1500);
+    });
+
+    it('acepta punto decimal ya existente', () => {
+        expect(finance.parseAmount('1500.50')).toBe(1500.5);
+    });
+
+    it('rechaza separador de miles (no soportado)', () => {
+        expect(Number.isNaN(finance.parseAmount('1.234,56'))).toBe(true);
+    });
+
+    it('rechaza texto no numérico', () => {
+        expect(Number.isNaN(finance.parseAmount('abc'))).toBe(true);
+    });
+
+    it('string vacío retorna 0 (contrato validateEntry)', () => {
+        expect(finance.parseAmount('')).toBe(0);
+    });
+
+    it('null retorna NaN', () => {
+        expect(Number.isNaN(finance.parseAmount(null))).toBe(true);
+    });
+
+    it('undefined retorna NaN', () => {
+        expect(Number.isNaN(finance.parseAmount(undefined))).toBe(true);
+    });
+
+    it('acepta números negativos', () => {
+        expect(finance.parseAmount('-50')).toBe(-50);
+    });
+
+    it('normaliza espacios alrededor', () => {
+        expect(finance.parseAmount('  1500,50  ')).toBe(1500.5);
+    });
 });
 
 // -------------------------------------------------------------------

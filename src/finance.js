@@ -176,12 +176,22 @@ function filterEntries(entries, { type, category, monthFrom, monthTo, search } =
     });
 }
 
+// Pura: convierte un string de monto con coma decimal (es-ES) a número.
+// Normaliza ',' -> '.', trimea, y retorna Number(). Nunca lanza: retorna NaN si es inválido.
+// Para string vacío retorna 0 (Number('') === 0), manteniendo el contrato actual de
+// validateEntry/parseEntryFromRow que rechazan montos <= 0.
+function parseAmount(value) {
+    if (value === null || value === undefined) return NaN;
+    const s = String(value).trim().replace(/,/g, '.');
+    return Number(s);
+}
+
 function validateEntry({ tipo, amount, category, description } = {}) {
     const errors = [];
     if (!tipo || (tipo !== 'expense' && tipo !== 'income' && tipo !== 'savings')) {
         errors.push('Seleccioná un tipo válido.');
     }
-    if (amount === undefined || amount === null || amount === '' || Number(amount) <= 0) {
+    if (amount === undefined || amount === null || amount === '' || parseAmount(amount) <= 0) {
         errors.push('El monto tiene que ser mayor a 0.');
     }
     if (!category || !category.trim()) {
@@ -395,7 +405,8 @@ function parseEntryFromRow(values) {
     if (!categoria) {
         errors.push('La categoría no puede estar vacía.');
     }
-    if (monto === undefined || monto === null || monto === '' || Number(monto) <= 0 || !isFinite(Number(monto))) {
+    const montoParsed = parseAmount(monto);
+    if (monto === undefined || monto === null || monto === '' || montoParsed <= 0 || !isFinite(montoParsed)) {
         errors.push('El monto tiene que ser mayor a 0.');
     }
     if (!descripcion) {
@@ -405,7 +416,7 @@ function parseEntryFromRow(values) {
     if (errors.length > 0) {
         return { errors };
     }
-    return { fecha, tipo, categoria, subcategoria, descripcion, monto: Number(monto) };
+    return { fecha, tipo, categoria, subcategoria, descripcion, monto: montoParsed };
 }
 
 // --- Exports para vitest / Node.js --------------------------------
@@ -423,6 +434,7 @@ if (typeof module !== 'undefined' && module.exports) {
         calculateBalance,
         filterEntries,
         validateEntry,
+        parseAmount,
         getDaysInMonth,
         getDaysElapsedInMonth,
         calculateDailyAverage,
@@ -455,6 +467,7 @@ if (typeof window !== 'undefined') {
     window.calculateBalance = calculateBalance;
     window.filterEntries = filterEntries;
     window.validateEntry = validateEntry;
+    window.parseAmount = parseAmount;
     window.getDaysInMonth = getDaysInMonth;
     window.getDaysElapsedInMonth = getDaysElapsedInMonth;
     window.calculateDailyAverage = calculateDailyAverage;
