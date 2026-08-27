@@ -166,3 +166,48 @@ describe('storage.saveCustomCategories() / loadCustomCategories()', () => {
         }
     });
 });
+
+// -------------------------------------------------------------------
+// Ajustes de IA (aiSettings)
+// -------------------------------------------------------------------
+const sampleAiSettings = { provider: 'openai', baseUrl: 'https://api.openai.com/v1', apiKey: 'sk-test', model: 'gpt-4o' };
+
+describe('storage.saveAiSettings() / loadAiSettings()', () => {
+    beforeEach(() => {
+        localStorage.removeItem('finanzas:ai-settings:v1');
+    });
+
+    afterEach(() => {
+        localStorage.removeItem('finanzas:ai-settings:v1');
+    });
+
+    it('guarda y recupera los ajustes de IA (roundtrip)', async () => {
+        await storage.saveAiSettings(sampleAiSettings);
+        const result = await storage.loadAiSettings();
+        expect(result.provider).toBe('openai');
+        expect(result.baseUrl).toBe('https://api.openai.com/v1');
+        expect(result.apiKey).toBe('sk-test');
+        expect(result.model).toBe('gpt-4o');
+        expect(result.id).toBe('active');
+        expect(typeof result.updatedAt).toBe('number');
+    });
+
+    it('usa localStorage como fallback cuando IndexedDB no está disponible', async () => {
+        const original = globalThis.indexedDB;
+        globalThis.indexedDB = undefined;
+        try {
+            await storage.saveAiSettings(sampleAiSettings);
+
+            // Debe haberse escrito en localStorage, no en IndexedDB
+            const raw = JSON.parse(localStorage.getItem('finanzas:ai-settings:v1'));
+            expect(raw.provider).toBe('openai');
+            expect(raw.model).toBe('gpt-4o');
+
+            const loaded = await storage.loadAiSettings();
+            expect(loaded.provider).toBe('openai');
+            expect(loaded.apiKey).toBe('sk-test');
+        } finally {
+            globalThis.indexedDB = original;
+        }
+    });
+});
