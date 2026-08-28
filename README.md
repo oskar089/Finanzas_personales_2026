@@ -24,6 +24,8 @@ A Progressive Web App to track personal finances (expenses, income and savings) 
 - **Import from Excel (.xlsx/.xls)** with validation.
 - Data stored in the browser (IndexedDB with localStorage fallback). It never leaves your machine.
 - **Important**: If you clear browser data or uninstall the app, all data is lost. Export to Excel regularly as backup.
+- **Multi-currency support**: 8 currencies (EUR, USD, GBP, ARS, MXN, BRL, JPY, CHF) with EUR as the fixed base. Amounts are always stored in EUR and converted only for display, with manual or live (Frankfurter) exchange rates.
+- **PWA install prompt**: install button shown via the `beforeinstallprompt` event (`manifest.json` with `display: standalone` and a Service Worker that precaches assets).
 - Service Worker for offline support (network-first for local assets, cache-first for CDN).
 - One-click launcher (`start.bat`) for Windows.
 
@@ -81,12 +83,12 @@ ollama serve
 npx vitest run
 ```
 
-105 tests covering pure functions in `src/finance.js` and storage logic.
+183 tests covering pure functions in the `src/` layer (finance, storage, ai-providers) and storage logic.
 
 ## Design Decisions
 
 - **Single source of truth**: the `entries` array in memory. IndexedDB syncs on every change. The UI re-renders from the array, not from patches.
-- **Currency**: euro with `es-ES` formatting.
+- **Currency**: EUR base with `es-ES` formatting. Multi-currency is supported by converting EUR to any of the 8 display currencies (amounts are stored in EUR, converted only for display). See `CURRENCIES` in `src/finance.js`.
 - **Centralized categories** in `src/finance.js` (`EXPENSE_CATEGORIES` and `INCOME_CATEGORIES`). Custom categories can be added via the UI.
 - **Versioned storage key** (`finanzas:gastos:v1`). If the structure changes in the future, it can be migrated by reading `v1` and writing `v2` without breaking old data.
 - **Excel with BOM** so Excel recognizes accents and n without asking for encoding, and with neutralized fields against formula injection.
@@ -98,5 +100,3 @@ npx vitest run
 
 - Data encryption in IndexedDB.
 - Cloud sync (OneDrive / Google Drive via API).
-- Multi-currency support.
-- PWA install prompt.
