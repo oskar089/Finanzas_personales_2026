@@ -1,4 +1,4 @@
-#!/usr/bin/pwsh
+﻿#!/usr/bin/pwsh
 # report-telegram.ps1 - Envia reporte de sesión a Telegram
 # Presiona F5 o ejecuta: & ".\scripts\report-telegram.ps1"
 # Requiere: $env:TELEGRAM_BOT_TOKEN y $env:TELEGRAM_CHAT_ID (desde .env)
@@ -53,14 +53,22 @@ $message = @"
 - Definir frecuencia/trigger de reporte (ya configurado: close de sesión, auto)
 "@
 
-# Enviar a Telegram
-$apiUrl = "https://api.telegram.org/bot$($env:TELEGRAM_BOT_TOKEN)/sendMessage"
+# Enviar a Telegram con HttpClient + StringContent UTF-8 explícito
+# (Invoke-RestMethod de PS 5.1 no preserva el UTF-8 del body: genera mojibake)
+Add-Type -AssemblyName System.Net.Http
 
-$response = Invoke-RestMethod -Method Post -Uri $apiUrl -Body @{
-    chat_id = $env:TELEGRAM_CHAT_ID
-    text = $message
+$apiUrl = "https://api.telegram.org/bot$($env:TELEGRAM_BOT_TOKEN)/sendMessage"
+$payload = @{
+    chat_id   = [long]$env:TELEGRAM_CHAT_ID
+    text      = $message
     parse_mode = "Markdown"
-} -ErrorAction Stop
+} | ConvertTo-Json -Compress
+
+$client  = New-Object System.Net.Http.HttpClient
+$content = New-Object System.Net.Http.StringContent($payload, [System.Text.Encoding]::UTF8, "application/json")
+$resp    = $client.PostAsync($apiUrl, $content).Result
+$body    = $resp.Content.ReadAsStringAsync().Result
+$response = $body | ConvertFrom-Json
 
 if ($response.ok) {
     Write-Host "✅ Reporte enviado a Telegram exitosamente" -ForegroundColor Green
