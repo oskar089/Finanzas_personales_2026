@@ -43,7 +43,7 @@ A new `src/crypto.js` module (pure Web Crypto layer, no DOM, no persistence) imp
 | Envelope storage layout | Per-record envelopes vs one envelope per store (whole payload) | Per-record: preserves per-key queries, but app NEVER key-queries (only getAll/clear/putAll — exploration §2) and per-record adds envelope overhead per row. Whole-store: one record, replace-all semantics already assume full-array writes. | **One envelope record per store** — payload encrypted whole; record key `'__enc__'` for keyPath stores, `'active'` for aiSettings/settings (single-key upsert replaces plaintext atomically) |
 | Envelope encoding | base64 strings vs Uint8Array | Uint8Array structured-clones fine in IDB but becomes `{}` through JSON in the LS mirror. Envelope must survive `JSON.stringify` for LS. | **base64 strings** (`v, alg, salt, iv, ct`) — single representation works identically in both backends; `toB64/fromB64` with 64 KB chunking |
 | Key-wrapping IV | Store a wrap IV vs derive deterministically | Storing adds a field; deriving from the same PBKDF2 run (dkLen 44 = 32 KEK + 12 wrap IV) needs no extra storage and is unique per fresh salt (one wrap per salt ever). | **PBKDF2-SHA256 dkLen 44** → first 32 bytes KEK, last 12 bytes wrap IV (deterministic, no storage) |
-| PBKDF2 cost | 310k vs 600k iterations | 310k ≈ ~1 s (spec-acceptable), 600k ≈ ~2 s on low-end. | **310,000 iterations, 16-byte salt** — constants in crypto.js; `iterations` also persisted in meta for future KDF evolution |
+| PBKDF2 cost | 310k vs 600k iterations | 310k ≈ ~1 s (spec-acceptable), 600k ≈ ~2 s on low-end. | **600,000 iterations, 16-byte salt** — constants in crypto.js; `iterations` also persisted in meta for future KDF evolution |
 | Envelope `salt` field | Omit (meta-only) vs include per payload | Spec DE2/DE9 literally list `{v, alg, salt, iv, ct}` and DE9 names salt among what makes a blob portable. | **Include `salt`** = current key-material salt (KDF context stamp; ~44 base64 chars per store, negligible); cloud-sync blob = cryptoMeta + payload envelopes |
 | AAD binding | Backend-specific (store name vs LS key) vs canonical store name | LS key differs per backend (`finanzas:gastos:v1` vs store `entries`); binding to it would make cross-backend decrypt fail (DE11 requires same envelope decryptable from either source). | **AAD = canonical store name** (e.g. `entries`), identical in both backends — DE8 still binds payload to its store, DE11 preserved |
 | Wrong-passphrase detection | Try/decrypt payload vs KEK unwrap fails | GCM unwrap is authenticated — a wrong KEK makes unwrap fail inevitably. | **Unwrap failure = wrong passphrase** (DE5); no heuristic needed |
@@ -73,7 +73,7 @@ A new `src/crypto.js` module (pure Web Crypto layer, no DOM, no persistence) imp
 ### `cryptoMeta` store (DB v7) — single record `id: 'meta'`
 
 ```js
-{ id: 'meta', v: 1, alg: 'PBKDF2-SHA256', iterations: 310000, salt: 'base64(16B)', wrappedDek: 'base64(48B)', updatedAt: number }
+{ id: 'meta', v: 1, alg: 'PBKDF2-SHA256', iterations: 600000, salt: 'base64(16B)', wrappedDek: 'base64(48B)', updatedAt: number }
 ```
 
 - `wrappedDek` = AES-GCM(wrapIv = last 12 bytes of the dkLen-44 derivation) wrapping the raw 32-byte DEK → 32 + 16 GCM tag = 48 bytes.
@@ -108,7 +108,7 @@ A new `src/crypto.js` module (pure Web Crypto layer, no DOM, no persistence) imp
 
 ```js
 const ENVELOPE_VERSION = 1, CIPHER_ALG = 'AES-GCM-256', KDF_ALG = 'PBKDF2-SHA256';
-const PBKDF2_ITERATIONS = 310000, SALT_BYTES = 16, IV_BYTES = 12, DEK_BYTES = 32;
+const PBKDF2_ITERATIONS = 600000, SALT_BYTES = 16, IV_BYTES = 12, DEK_BYTES = 32;
 const KDF_DKLEN = 44; // 32 KEK + 12 deterministic wrap IV
 let state = { ready: false, dek: null, salt: null, iterations: PBKDF2_ITERATIONS };
 
@@ -327,4 +327,4 @@ N/A — no routing, shell, subprocess, VCS/PR automation, executable-file classi
 - [x] RESOLVED: spec DE2/DE9 list `salt` inside the payload envelope while DE2 also puts salt in `cryptoMeta` — resolved by including the current key-material salt in every envelope (context stamp; negligible 44-char overhead per store, one envelope per store, not per row).
 - [x] RESOLVED: cryptoMeta persistence ownership — storage.js (single persistence owner); crypto.js receives/persists meta via init return.
 - [x] RESOLVED: jsdom `crypto.subtle` gap — storage.test.js injects `node:crypto` webcrypto subtle; crypto.test.js runs under `// @vitest-environment node`.
-- [ ] PBKDF2 iteration count is a documented constant (310k); revisit if the ~1 s boot cost regresses on low-end hardware during manual testing.
+- [ ] PBKDF2 iteration count is a documented constant (600k per OWASP 2026); revisit if the ~2 s boot cost regresses on low-end hardware during manual testing.

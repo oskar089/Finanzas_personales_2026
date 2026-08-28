@@ -6,8 +6,19 @@
 
 import 'fake-indexeddb/auto';
 import { vi, describe, it, expect, beforeEach } from 'vitest';
+import { webcrypto } from 'node:crypto';
 import * as storage from './storage.js';
 import * as aiProviders from './ai-providers.js';
+
+// El storage ahora es key-gated (almacenes cifrados), así que exponemos
+// webcrypto de Node y abrimos una clave antes de persistir (PR #2 data-encryption).
+Object.defineProperty(globalThis, 'crypto', {
+    value: webcrypto,
+    configurable: true,
+    writable: true
+});
+
+const TEST_PASSPHRASE = 'contraseña-de-prueba-2026';
 
 // --- Helpers -----------------------------------------------------------
 
@@ -82,6 +93,8 @@ const sampleMessages = [
 beforeEach(async () => {
     // Clear IndexedDB and localStorage
     await storage.clear();
+    // Abrimos la clave de cifrado para poder persistir (storage key-gated, PR #2)
+    await storage.initKey(TEST_PASSPHRASE);
     // Clear AI settings directly
     try {
         const db = await new Promise((resolve, reject) => {

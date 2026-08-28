@@ -35,7 +35,7 @@ Line budget breakdown: crypto.js ≈ 200 (new) + crypto.test.js ≈ 190 (new) + 
   2. `migrateLsKey(lsKey, aad)` — rewrites a legacy plaintext LS mirror as a ciphertext envelope with decrypt read-back verify (dual-write mirrors only; fallback keys are purged instead).
   Also spelled out: `idbGetCryptoMeta`/`idbPutCryptoMeta`/`lsLoadCryptoMeta`/`lsSaveCryptoMeta` (record id `'meta'`, LS key `finanzas:crypto-meta:v1`), `hasEncryptedData()` (any raw store row isEnvelope → true; guards `initKey` against meta-missing-but-ciphertext via `KeyMaterialMissingError`), `isEnvelope(v)` (`v && typeof v === 'object' && v.v === 1 && typeof v.alg === 'string' && typeof v.iv === 'string' && typeof v.ct === 'string'`).
 - **sw.js**: design lists it "untouched" — true for data flow, but NFR "offline/local operation preserved" requires the NEW asset in the precache list (task 4.1, one line). Without it, offline boot serves storage.js without `window.fpCrypto`.
-- PBKDF2 310k iterations (~1 s boot) stays a documented open item needing a low-end-device manual check (design Open Questions).
+- PBKDF2 600k iterations (~2 s boot) stays a documented open item needing a low-end-device manual check (design Open Questions).
 
 ### Requirement Coverage
 

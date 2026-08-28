@@ -5,6 +5,10 @@
 // =====================================================================
 
 import 'fake-indexeddb/auto';
+import { webcrypto } from 'node:crypto';
+// jsdom solo expone un Crypto sin `subtle` (getReadOnly). Reemplazamos el global
+// por el webcrypto de Node para que el envelope (crypto.subtle) funcione aquí.
+Object.defineProperty(globalThis, 'crypto', { value: webcrypto, configurable: true, writable: true });
 import * as storage from './storage.js';
 
 // Datos de prueba
@@ -13,8 +17,13 @@ const sampleEntries = [
     { id: 'def456', tipo: 'income', monto: 2000, categoria: 'Sueldo', descripcion: 'Sueldo agosto', fecha: '2026-08-05' }
 ];
 
-// Limpiar entre tests
+const TEST_PASSPHRASE = 'contraseña-de-prueba-2026';
+
+// Limpiar entre tests (gate primero, luego clear: nunca borrar antes de resolver la clave)
 beforeEach(async () => {
+    // initKey es idempotente: la primera llamada deriva y persiste el meta; las
+    // subsiguientes resuelven la misma clave sin re-derivar (~1 s solo la primera).
+    await storage.initKey(TEST_PASSPHRASE);
     await storage.clear();
 });
 
@@ -155,9 +164,10 @@ describe('storage.saveCustomCategories() / loadCustomCategories()', () => {
         try {
             await storage.saveCustomCategories(sampleCustomCategories);
 
-            // Debe haberse escrito en localStorage, no en IndexedDB
+            // El espejo LS es un envelope cifrado, no plaintext (DE11)
             const raw = JSON.parse(localStorage.getItem('finanzas:custom-categories:v1'));
-            expect(raw).toEqual(sampleCustomCategories);
+            expect(isEnvelopeLike(raw)).toBe(true);
+            expect(JSON.stringify(raw)).not.toContain('Mascotas');
 
             const loaded = await storage.loadCustomCategories();
             expect(loaded).toEqual(sampleCustomCategories);
@@ -198,10 +208,10 @@ describe('storage.saveAiSettings() / loadAiSettings()', () => {
         try {
             await storage.saveAiSettings(sampleAiSettings);
 
-            // Debe haberse escrito en localStorage, no en IndexedDB
+            // El espejo LS es un envelope cifrado; la apiKey nunca aparece en claro (DE7)
             const raw = JSON.parse(localStorage.getItem('finanzas:ai-settings:v1'));
-            expect(raw.provider).toBe('openai');
-            expect(raw.model).toBe('gpt-4o');
+            expect(isEnvelopeLike(raw)).toBe(true);
+            expect(JSON.stringify(raw)).not.toContain('sk-test');
 
             const loaded = await storage.loadAiSettings();
             expect(loaded.provider).toBe('openai');
@@ -213,12 +223,12 @@ describe('storage.saveAiSettings() / loadAiSettings()', () => {
 });
 
 // -------------------------------------------------------------------
-// Ajustes de moneda (currency settings) — DB v6
+// Ajustes de moneda (currency settings) — DB v7
 // -------------------------------------------------------------------
 const sampleCurrencySettings = { baseCurrency: 'EUR', displayCurrency: 'USD', rates: { USD: 1.1 } };
 
-describe('storage: DB v6 expone el store settings (aditivo)', () => {
-    it('abre la DB v6 y expone el store settings junto a los existentes', async () => {
+describe('storage: DB v7 expone el store cryptoMeta + los stores legacy (aditivo)', () => {
+    it('abre la DB v7 y expone cryptoMeta junto a los 6 stores legacy', async () => {
         // Disparar la migración real a través del módulo storage (openDB con DB_VERSION)
         await storage.loadAiSettings();
         const db = await new Promise((resolve, reject) => {
@@ -226,14 +236,15 @@ describe('storage: DB v6 expone el store settings (aditivo)', () => {
             req.onsuccess = () => resolve(req.result);
             req.onerror = () => reject(req.error);
         });
-        expect(db.version).toBe(6);
-        expect(db.objectStoreNames.contains('settings')).toBe(true);
+        expect(db.version).toBe(7);
+        expect(db.objectStoreNames.contains('cryptoMeta')).toBe(true);
         // Migración aditiva: los stores existentes se preservan
         expect(db.objectStoreNames.contains('entries')).toBe(true);
         expect(db.objectStoreNames.contains('budgets')).toBe(true);
         expect(db.objectStoreNames.contains('recurring')).toBe(true);
         expect(db.objectStoreNames.contains('customCategories')).toBe(true);
         expect(db.objectStoreNames.contains('aiSettings')).toBe(true);
+        expect(db.objectStoreNames.contains('settings')).toBe(true);
     });
 });
 
@@ -262,10 +273,10 @@ describe('storage.saveCurrencySettings() / loadCurrencySettings()', () => {
         globalThis.indexedDB = undefined;
         try {
             await storage.saveCurrencySettings(sampleCurrencySettings);
-            // Debe haberse escrito en localStorage, no en IndexedDB
+            // El espejo LS es un envelope cifrado (DE13 dual-write)
             const raw = JSON.parse(localStorage.getItem('finanzas:settings:v1'));
-            expect(raw.displayCurrency).toBe('USD');
-            expect(raw.rates.USD).toBe(1.1);
+            expect(isEnvelopeLike(raw)).toBe(true);
+            expect(JSON.stringify(raw)).not.toContain('USD');
 
             const loaded = await storage.loadCurrencySettings();
             expect(loaded.displayCurrency).toBe('USD');
@@ -281,5 +292,271 @@ describe('storage.saveCurrencySettings() / loadCurrencySettings()', () => {
         const loaded = await storage.loadCurrencySettings();
         expect(loaded).toBeNull();
         expect(localStorage.getItem('finanzas:settings:v1')).toBeNull();
+    });
+});
+
+// -------------------------------------------------------------------
+// API de clave + cryptoMeta al reposo (DE1/DE2 a nivel storage, DB v7)
+// -------------------------------------------------------------------
+function openRawDb() {
+    return new Promise((resolve, reject) => {
+        const req = indexedDB.open('finanzas_personales_2026');
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+    });
+}
+
+function idbGetAllRaw(db, storeName) {
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(storeName, 'readonly');
+        const req = tx.objectStore(storeName).getAll();
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+    });
+}
+
+// Mismo predicado que storage.isEnvelope (envelope de almacén, v1).
+function isEnvelopeLike(v) {
+    return !!v && typeof v === 'object' && v.v === 1 && typeof v.alg === 'string'
+        && typeof v.iv === 'string' && typeof v.ct === 'string';
+}
+
+describe('storage: key API + cryptoMeta al reposo', () => {
+    it('hasEncryptionKey() true después de initKey, e initKey es idempotente con la misma clave', async () => {
+        // beforeEach ya llamó initKey(TEST_PASSPHRASE)
+        expect(await storage.hasEncryptionKey()).toBe(true);
+        // Segunda llamada con la misma clave no rechaza (re-resuelve el mismo meta)
+        await expect(storage.initKey(TEST_PASSPHRASE)).resolves.toBe(true);
+    });
+
+    it('el record cryptoMeta raw guarda SOLO wrappedDek + salt, sin kek/dek en claro', async () => {
+        const db = await openRawDb();
+        const rows = await idbGetAllRaw(db, 'cryptoMeta');
+        const meta = rows.find(r => r.id === 'meta');
+        expect(meta).toBeTruthy();
+        expect(typeof meta.salt).toBe('string');
+        // wrappedDek es un DEK de 32B envuelto + tag GCM 16B = 48 bytes => base64 64 chars
+        expect(meta.wrappedDek).toMatch(/^[A-Za-z0-9+/]{64}$/);
+        expect(meta.iterations).toBe(600000);
+        // Ni la KEK ni el DEK crudo aparecen en ningún string del meta
+        expect(JSON.stringify(meta)).not.toMatch(/AES-GCM/);
+        expect(JSON.stringify(meta)).not.toContain('keyData');
+    });
+
+    it('el espejo LS finanzas:crypto-meta:v1 solo contiene wrappedDek + salt', async () => {
+        const raw = JSON.parse(localStorage.getItem('finanzas:crypto-meta:v1'));
+        expect(raw).toBeTruthy();
+        expect(raw.id).toBe('meta');
+        expect(typeof raw.wrappedDek).toBe('string');
+        expect(raw.wrappedDek.length).toBe(64);
+        expect(typeof raw.salt).toBe('string');
+        expect(JSON.stringify(raw)).not.toContain('dek');
+        expect(JSON.stringify(raw)).not.toContain('keyData');
+    });
+});
+
+// -------------------------------------------------------------------
+// Gate antes de escribir (sin initKey no hay escritura ni lectura)
+// -------------------------------------------------------------------
+describe('storage: gate sin clave antes de escribir', () => {
+    let originalFpCrypto;
+    let fresh;
+    beforeEach(async () => {
+        // storage.js resuelve fpCrypto vía window.fpCrypto si está presente (contracto
+        // de carga). Inyectamos un stub "no inicializado" y re-importamos storage para
+        // que capture ese stub => assertKeyReady() debe rechazar sin tocar datos.
+        originalFpCrypto = window.fpCrypto;
+        window.fpCrypto = {
+            isEncryptionReady: () => false,
+            encryptPayload: async () => ({}),
+            decryptPayload: async () => ({}),
+            init: async () => null,
+            changePassphrase: async () => null,
+        };
+        vi.resetModules();
+        fresh = await import('./storage.js');
+    });
+    afterEach(() => {
+        window.fpCrypto = originalFpCrypto;
+        vi.unstubAllGlobals();
+        vi.restoreAllMocks();
+    });
+
+    it('save() sin initKey rechaza /no inicializado/ y no toca datos previos', async () => {
+        // Sembrar datos CON clave (módulo principal ya resuelto en el beforeEach global)
+        await storage.clear();
+        await storage.save(sampleEntries);
+        // Ahora con un fpCrypto SIN clave: save() debe rechazar sin borrar lo sembrado
+        await expect(fresh.save([{ id: 'nuevo1', tipo: 'expense', monto: 5, categoria: 'X' }]))
+            .rejects.toThrow(/no inicializado/i);
+        // El store no fue limpiado: el dato previo sigue intacto (sin escritura parcial)
+        const db = await openRawDb();
+        const rows = await idbGetAllRaw(db, 'entries');
+        expect(rows.length).toBeGreaterThan(0);
+    });
+
+    it('load() sin initKey rechaza /no inicializado/ y no devuelve fallback en claro', async () => {
+        localStorage.setItem('finanzas:gastos:v1', '[]');
+        await expect(fresh.load()).rejects.toThrow(/no inicializado/i);
+        localStorage.removeItem('finanzas:gastos:v1');
+    });
+});
+
+// -------------------------------------------------------------------
+// Entries como envelope de almacén (DE11: un solo envelope por store)
+// -------------------------------------------------------------------
+describe('storage: save() escribe UN envelope de almacén y load() descifra', () => {
+    it('save(sampleEntries) produce exactamente un registro envelope en el store entries', async () => {
+        await storage.save(sampleEntries);
+        const db = await openRawDb();
+        const rows = await idbGetAllRaw(db, 'entries');
+        expect(rows).toHaveLength(1);
+        const rec = rows[0];
+        expect(rec.id).toBe('__enc__');
+        expect(rec.v).toBe(1);
+        expect(rec.alg).toBe('AES-GCM-256');
+        expect(typeof rec.iv).toBe('string');
+        expect(typeof rec.ct).toBe('string');
+    });
+
+    it('load() descifra el envelope y devuelve deep-equal a sampleEntries (tipo normalizado)', async () => {
+        await storage.save(sampleEntries);
+        const loaded = await storage.load();
+        expect(loaded).toEqual(sampleEntries);
+    });
+});
+
+// -------------------------------------------------------------------
+// DE7/DE13/DE14: aiSettings, settings y customCategories cifrados al reposo
+// -------------------------------------------------------------------
+function idbGetRaw(db, storeName, key) {
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(storeName, 'readonly');
+        const req = tx.objectStore(storeName).get(key);
+        req.onsuccess = () => resolve(req.result || null);
+        req.onerror = () => reject(req.error);
+    });
+}
+
+describe('storage: cifrado al reposo en todos los stores sensibles (DE7/DE13/DE14)', () => {
+    afterEach(() => {
+        localStorage.removeItem('finanzas:ai-settings:v1');
+        localStorage.removeItem('finanzas:settings:v1');
+        localStorage.removeItem('finanzas:custom-categories:v1');
+    });
+
+    it('apiKey nunca aparece en claro en IDB ni en LS (DE7)', async () => {
+        await storage.saveAiSettings({ provider: 'openai', apiKey: 'sk-test-123', model: 'gpt-4o' });
+        const db = await openRawDb();
+        const idbRec = await idbGetRaw(db, 'aiSettings', 'active');
+        expect(idbRec).toBeTruthy();
+        expect(isEnvelopeLike(idbRec)).toBe(true);
+        expect(idbRec.id).toBe('active');
+        expect(JSON.stringify(idbRec)).not.toContain('sk-test-123');
+
+        const lsRaw = JSON.parse(localStorage.getItem('finanzas:ai-settings:v1'));
+        expect(isEnvelopeLike(lsRaw)).toBe(true);
+        expect(JSON.stringify(lsRaw)).not.toContain('sk-test-123');
+        // El path normal de carga sigue devolviendo la apiKey en claro en memoria
+        const loaded = await storage.loadAiSettings();
+        expect(loaded.apiKey).toBe('sk-test-123');
+    });
+
+    it('dual-write settings cifrado en ambos lados (DE13)', async () => {
+        await storage.saveCurrencySettings({ baseCurrency: 'EUR', displayCurrency: 'USD', rates: { USD: 1.1 } });
+        const db = await openRawDb();
+        const idbRec = await idbGetRaw(db, 'settings', 'active');
+        expect(isEnvelopeLike(idbRec)).toBe(true);
+        const lsRaw = JSON.parse(localStorage.getItem('finanzas:settings:v1'));
+        expect(isEnvelopeLike(lsRaw)).toBe(true);
+        // Ambos espejos descifran al mismo record plaintext a través del boot path
+        const loaded = await storage.loadCurrencySettings();
+        expect(loaded.baseCurrency).toBe('EUR');
+        expect(loaded.displayCurrency).toBe('USD');
+        expect(loaded.rates.USD).toBe(1.1);
+    });
+
+    it('customCategories cifrado y sin pérdida en IDB (DE14, fallback store)', async () => {
+        const cats = [
+            { nombre: 'Mascotas', tipo: 'expense', createdAt: '2026-08-01T10:00:00.000Z' },
+            { nombre: 'Regalos', tipo: 'income', createdAt: '2026-08-02T10:00:00.000Z' },
+        ];
+        await storage.saveCustomCategories(cats);
+        const db = await openRawDb();
+        const rows = await idbGetAllRaw(db, 'customCategories');
+        expect(rows).toHaveLength(1);
+        expect(isEnvelopeLike(rows[0])).toBe(true);
+        // Round-trip sin pérdida descifrando el envelope de almacén
+        const loaded = await storage.loadCustomCategories();
+        expect(loaded).toEqual(cats);
+    });
+});
+
+// -------------------------------------------------------------------
+// DE11/DE15: espejos idénticos en ambos backends + round-trip LS puro
+// -------------------------------------------------------------------
+describe('storage: DE11/DE15 espejos idénticos y fallback LS puro', () => {
+    afterEach(() => {
+        localStorage.removeItem('finanzas:ai-settings:v1');
+        localStorage.removeItem('finanzas:gastos:v1');
+        localStorage.removeItem('finanzas:dark-mode');
+    });
+
+    it('dual-write: el envelope IDB y el espejo LS son idénticos y ambos descifran (DE11)', async () => {
+        const settings = { provider: 'openai', apiKey: 'sk-x', model: 'gpt-4o' };
+        await storage.saveAiSettings(settings);
+        const db = await openRawDb();
+        const idbEnv = await idbGetRaw(db, 'aiSettings', 'active');
+        const lsEnv = JSON.parse(localStorage.getItem('finanzas:ai-settings:v1'));
+        // Mismo salt/iv/ct: un solo encrypt compartido por ambos backends
+        expect(idbEnv).toEqual(lsEnv);
+
+        // IDB caído: el espejo LS descifra al mismo plaintext (DE11 "cualquiera descifra")
+        const original = globalThis.indexedDB;
+        globalThis.indexedDB = undefined;
+        try {
+            const loaded = await storage.loadAiSettings();
+            expect(loaded.provider).toBe('openai');
+            expect(loaded.apiKey).toBe('sk-x');
+            expect(loaded.id).toBe('active');
+            expect(typeof loaded.updatedAt).toBe('number');
+        } finally {
+            globalThis.indexedDB = original;
+        }
+    });
+
+    it('round-trip LS puro (IDB caído): envelope en LS y load descifra el original (DE15)', async () => {
+        const original = globalThis.indexedDB;
+        globalThis.indexedDB = undefined;
+        try {
+            await storage.save(sampleEntries);
+            const raw = JSON.parse(localStorage.getItem('finanzas:gastos:v1'));
+            expect(isEnvelopeLike(raw)).toBe(true);
+            expect(JSON.stringify(raw)).not.toContain('abc123');
+            const loaded = await storage.load();
+            expect(loaded).toEqual(sampleEntries);
+        } finally {
+            globalThis.indexedDB = original;
+        }
+    });
+
+    it('passthrough legacy: LS plaintext legacy se devuelve tal cual (IDB caído)', async () => {
+        const legacy = [{ id: 'l1', monto: 5, categoria: 'X', fecha: '2026-01-01' }];
+        localStorage.setItem('finanzas:gastos:v1', JSON.stringify(legacy));
+        const original = globalThis.indexedDB;
+        globalThis.indexedDB = undefined;
+        try {
+            const loaded = await storage.load();
+            expect(loaded).toEqual(legacy);
+        } finally {
+            globalThis.indexedDB = original;
+        }
+    });
+
+    it('finanzas:dark-mode sigue en claro y no es tocado por el ciclo save/load', async () => {
+        localStorage.setItem('finanzas:dark-mode', 'true');
+        await storage.save(sampleEntries);
+        await storage.load();
+        expect(localStorage.getItem('finanzas:dark-mode')).toBe('true');
     });
 });

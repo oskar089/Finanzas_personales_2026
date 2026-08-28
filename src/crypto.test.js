@@ -42,7 +42,7 @@ describe('init() — passphrase policy (DE1)', () => {
         expect(meta.salt).toHaveLength(24); // base64(16B)
         expect(meta.wrappedDek).toMatch(/^[A-Za-z0-9+/]+={0,2}$/);
         expect(meta.wrappedDek).toHaveLength(64); // base64(48B) = 32B DEK + tag GCM
-        expect(meta.iterations).toBe(310000);
+        expect(meta.iterations).toBe(600000);
     });
 });
 
