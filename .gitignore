@@ -22,3 +22,6 @@ coverage/
 
 # OpenCode skill registry (se stagea solo en background y corrompe el indice)
 .atl/
+
+# Local environment variables (nunca commitear)
+.env
