@@ -560,3 +560,272 @@ describe('storage: DE11/DE15 espejos idénticos y fallback LS puro', () => {
         expect(localStorage.getItem('finanzas:dark-mode')).toBe('true');
     });
 });
+
+// ============================================================================
+// Phase 3: Migración v6→v7 (seeded legacy suite)
+// ============================================================================
+
+// Helper para sembrar DB v6 legacy: crea DB v6 con 6 stores y datos plaintext
+async function seedLegacyV6() {
+    // Borrar DB existente y abrir v6
+    await indexedDB.deleteDatabase('finanzas_personales_2026');
+    const db = await new Promise((resolve, reject) => {
+        const req = indexedDB.open('finanzas_personales_2026', 6);
+        req.onupgradeneeded = (event) => {
+            const db = event.target.result;
+            if (!db.objectStoreNames.contains('entries')) {
+                db.createObjectStore('entries', { keyPath: 'id' });
+            }
+            if (!db.objectStoreNames.contains('budgets')) {
+                db.createObjectStore('budgets', { keyPath: 'categoria' });
+            }
+            if (!db.objectStoreNames.contains('recurring')) {
+                db.createObjectStore('recurring', { keyPath: 'id' });
+            }
+            if (!db.objectStoreNames.contains('customCategories')) {
+                db.createObjectStore('customCategories', { keyPath: 'nombre' });
+            }
+            if (!db.objectStoreNames.contains('aiSettings')) {
+                db.createObjectStore('aiSettings', { keyPath: 'id' });
+            }
+            if (!db.objectStoreNames.contains('settings')) {
+                db.createObjectStore('settings', { keyPath: 'id' });
+            }
+        };
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+    });
+
+    // Sembrar plaintext en TODOS los stores (incluyendo dual-write mirrors)
+    const tx = db.transaction(['entries', 'budgets', 'recurring', 'customCategories', 'aiSettings', 'settings'], 'readwrite');
+    tx.objectStore('entries').put({ id: 'e1', tipo: 'expense', monto: 100, categoria: 'Comida', descripcion: 'Almuerzo', fecha: '2026-08-01' });
+    tx.objectStore('entries').put({ id: 'e2', tipo: 'income', monto: 2000, categoria: 'Sueldo', descripcion: 'Sueldo agosto', fecha: '2026-08-05' });
+    tx.objectStore('budgets').put({ categoria: 'Comida', monto: 500 });
+    tx.objectStore('recurring').put({ id: 'r1', nombre: 'Suscripción', monto: 50, categoria: 'Servicios', frecuencia: 'monthly', fechaInicio: '2026-01-01' });
+    tx.objectStore('customCategories').put({ nombre: 'Mascotas', tipo: 'expense', createdAt: '2026-08-01T10:00:00.000Z' });
+    tx.objectStore('aiSettings').put({ id: 'active', provider: 'openai', apiKey: 'sk-legacy-123', model: 'gpt-4o', updatedAt: Date.now() });
+    tx.objectStore('settings').put({ id: 'active', baseCurrency: 'EUR', displayCurrency: 'USD', rates: { USD: 1.1 }, updatedAt: Date.now() });
+    await new Promise((resolve, reject) => {
+        tx.oncomplete = resolve;
+        tx.onerror = () => reject(tx.error);
+    });
+
+    // Sembrar LS mirrors para los 6 stores (incluyendo fallback keys)
+    localStorage.setItem('finanzas:gastos:v1', JSON.stringify([
+        { id: 'e1', tipo: 'expense', monto: 100, categoria: 'Comida', descripcion: 'Almuerzo', fecha: '2026-08-01' },
+        { id: 'e2', tipo: 'income', monto: 2000, categoria: 'Sueldo', descripcion: 'Sueldo agosto', fecha: '2026-08-05' }
+    ]));
+    localStorage.setItem('finanzas:budgets:v1', JSON.stringify({ categoria: 'Comida', monto: 500 }));
+    localStorage.setItem('finanzas:recurring:v1', JSON.stringify([{ id: 'r1', nombre: 'Suscripción', monto: 50, categoria: 'Servicios', frecuencia: 'monthly', fechaInicio: '2026-01-01' }]));
+    localStorage.setItem('finanzas:custom-categories:v1', JSON.stringify([{ nombre: 'Mascotas', tipo: 'expense', createdAt: '2026-08-01T10:00:00.000Z' }]));
+    localStorage.setItem('finanzas:ai-settings:v1', JSON.stringify({ id: 'active', provider: 'openai', apiKey: 'sk-legacy-123', model: 'gpt-4o', updatedAt: Date.now() }));
+    localStorage.setItem('finanzas:settings:v1', JSON.stringify({ id: 'active', baseCurrency: 'EUR', displayCurrency: 'USD', rates: { USD: 1.1 }, updatedAt: Date.now() }));
+    // Fallback keys (pre-migration window) - duplicates overwritten by last setItem
+    localStorage.setItem('finanzas:gastos:v1', JSON.stringify([
+        { id: 'e1', tipo: 'expense', monto: 100, categoria: 'Comida', descripcion: 'Almuerzo', fecha: '2026-08-01' }
+    ]));
+    localStorage.setItem('finanzas:budgets:v1', JSON.stringify({ categoria: 'Comida', monto: 500 }));
+    localStorage.setItem('finanzas:recurring:v1', JSON.stringify([{ id: 'r1', nombre: 'Suscripción', monto: 50, categoria: 'Servicios', frecuencia: 'monthly', fechaInicio: '2026-01-01' }]));
+    localStorage.setItem('finanzas:custom-categories:v1', JSON.stringify([{ nombre: 'Mascotas', tipo: 'expense', createdAt: '2026-08-01T10:00:00.000Z' }]));
+    // finanzas:migrated NO está seteado (simula primera migración)
+    localStorage.removeItem('finanzas:migrated');
+
+    return db;
+}
+
+// --- 3.1 RED: seedLegacyV6 + initKey + load() → DB v7, cryptoMeta, envelopes, lossless ---
+describe('storage: migración v6→v7 (DE12 lossless)', () => {
+    it('seedLegacyV6 + initKey + load() produce DB v7 con cryptoMeta y todos los stores como envelopes', { timeout: 120000 }, async () => {
+        await seedLegacyV6();
+        await storage.initKey(TEST_PASSPHRASE);
+        const loaded = await storage.load();
+
+        // DB version upgraded to 7
+        const db = await openRawDb();
+        expect(db.version).toBe(7);
+        expect(db.objectStoreNames.contains('cryptoMeta')).toBe(true);
+
+        // cryptoMeta store + record
+        const metaRows = await rawGetAll(db, 'cryptoMeta');
+        const meta = metaRows.find(r => r.id === 'meta');
+        expect(meta).toBeTruthy();
+        expect(typeof meta.salt).toBe('string');
+        expect(meta.wrappedDek).toMatch(/^[A-Za-z0-9+/]{64}$/);
+        expect(meta.iterations).toBe(600000);
+
+        // Cada raw store = exactamente UN envelope record
+        for (const store of ['entries', 'budgets', 'recurring', 'customCategories', 'aiSettings', 'settings']) {
+            const rows = await rawGetAll(db, store);
+            expect(rows).toHaveLength(1);
+            expect(isEnvelopeLike(rows[0])).toBe(true);
+        }
+
+        // Dual LS keys (aiSettings, settings) son envelopes
+        const aiLs = JSON.parse(localStorage.getItem('finanzas:ai-settings:v1'));
+        expect(isEnvelopeLike(aiLs)).toBe(true);
+        const settingsLs = JSON.parse(localStorage.getItem('finanzas:settings:v1'));
+        expect(isEnvelopeLike(settingsLs)).toBe(true);
+
+        // Fallback LS keys (entries, budgets, recurring, customCategories) REMOVIDOS
+        expect(localStorage.getItem('finanzas:gastos:v1')).toBeNull();
+        expect(localStorage.getItem('finanzas:budgets:v1')).toBeNull();
+        expect(localStorage.getItem('finanzas:recurring:v1')).toBeNull();
+        expect(localStorage.getItem('finanzas:custom-categories:v1')).toBeNull();
+
+        // load() deep-equals al plaintext original (zero loss)
+        expect(loaded).toEqual([
+            { id: 'e1', tipo: 'expense', monto: 100, categoria: 'Comida', descripcion: 'Almuerzo', fecha: '2026-08-01' },
+            { id: 'e2', tipo: 'income', monto: 2000, categoria: 'Sueldo', descripcion: 'Sueldo agosto', fecha: '2026-08-05' }
+        ]);
+    });
+});
+
+// --- 3.2 GREEN: migrateEncryption ya implementado (verificado por test anterior) ---
+
+// --- 3.3 RED: purge-after-verify - encryptPayload mock rejection ---
+describe('storage: migración v6→v7 purge-after-verify (DE12)', () => {
+    it('si encryptPayload falla durante migración, load() RECHAZA con error de migración y NO purga plaintext', { timeout: 30000 }, async () => {
+        await seedLegacyV6();
+        await storage.initKey(TEST_PASSPHRASE);
+
+        // Spy que falla en el PRIMER store (entries)
+        const originalEncrypt = storage.fpCrypto?.encryptPayload || (await import('./crypto.js')).default?.encryptPayload;
+        // Usamos vi.spyOn sobre window.fpCrypto que es lo que storage usa en browser
+        const spy = vi.spyOn(window.fpCrypto, 'encryptPayload').mockRejectedValueOnce(new Error('boom'));
+
+        // load() debe RECHAZAR con error de migración (no "starts empty")
+        await expect(storage.load()).rejects.toThrow();
+
+        // Raw store entries sigue siendo plaintext legacy (rawClear NO llamado)
+        const db = await openRawDb();
+        const rows = await rawGetAll(db, 'entries');
+        expect(rows.length).toBe(2); // 2 entries legacy
+        expect(rows[0].id).toBe('e1');
+
+        // Plaintext LS keys retenidas
+        expect(localStorage.getItem('finanzas:gastos:v1')).toBeTruthy();
+
+        spy.mockRestore();
+    });
+
+    it('tras fallo, retry sin mock succeed y purga legacy', { timeout: 30000 }, async () => {
+        await seedLegacyV6();
+        await storage.initKey(TEST_PASSPHRASE);
+
+        // Primer intento falla
+        const spy = vi.spyOn(window.fpCrypto, 'encryptPayload').mockRejectedValueOnce(new Error('boom'));
+        await expect(storage.load()).rejects.toThrow();
+        spy.mockRestore();
+
+        // Segundo intento: sin mock, debe tener éxito y migrar
+        const loaded = await storage.load();
+        expect(loaded).toHaveLength(2);
+
+        // Legacy purgado
+        const db = await openRawDb();
+        const rows = await rawGetAll(db, 'entries');
+        expect(rows).toHaveLength(1);
+        expect(isEnvelopeLike(rows[0])).toBe(true);
+    });
+});
+
+// --- 3.4 GREEN: verify-before-purge ya implementado (read-back antes de rawClear) ---
+
+// --- 3.5 RED: migrateLsKeysWhenIdbDown (IDB unavailable + legacy LS) ---
+describe('storage: migrateLsKeysWhenIdbDown (DE12-LS + DE15)', () => {
+    it('IDB unavailable + legacy LS + initKey → load() cifra TODAS las claves LS in-place y descifra', { timeout: 30000 }, async () => {
+        // Sembrar solo LS legacy (sin IDB)
+        await indexedDB.deleteDatabase('finanzas_personales_2026');
+        localStorage.setItem('finanzas:gastos:v1', JSON.stringify([
+            { id: 'e1', tipo: 'expense', monto: 100, categoria: 'Comida', descripcion: 'Almuerzo', fecha: '2026-08-01' }
+        ]));
+        localStorage.setItem('finanzas:budgets:v1', JSON.stringify({ categoria: 'Comida', monto: 500 }));
+        localStorage.setItem('finanzas:recurring:v1', JSON.stringify([{ id: 'r1', nombre: 'Suscripción', monto: 50, categoria: 'Servicios', frecuencia: 'monthly', fechaInicio: '2026-01-01' }]));
+        localStorage.setItem('finanzas:custom-categories:v1', JSON.stringify([{ nombre: 'Mascotas', tipo: 'expense', createdAt: '2026-08-01T10:00:00.000Z' }]));
+        localStorage.setItem('finanzas:ai-settings:v1', JSON.stringify({ id: 'active', provider: 'openai', apiKey: 'sk-ls-only', model: 'gpt-4o', updatedAt: Date.now() }));
+        localStorage.setItem('finanzas:settings:v1', JSON.stringify({ id: 'active', baseCurrency: 'EUR', displayCurrency: 'USD', rates: { USD: 1.1 }, updatedAt: Date.now() }));
+        localStorage.removeItem('finanzas:migrated');
+
+        const original = globalThis.indexedDB;
+        globalThis.indexedDB = undefined;
+        try {
+            await storage.initKey(TEST_PASSPHRASE);
+            const loaded = await storage.load();
+
+            // TODAS las claves LS ahora son envelopes cifrados
+            for (const key of ['finanzas:gastos:v1', 'finanzas:budgets:v1', 'finanzas:recurring:v1', 'finanzas:custom-categories:v1', 'finanzas:ai-settings:v1', 'finanzas:settings:v1']) {
+                const raw = JSON.parse(localStorage.getItem(key));
+                expect(isEnvelopeLike(raw)).toBe(true);
+            }
+
+            // load() devuelve el plaintext original
+            expect(loaded).toHaveLength(1);
+            expect(loaded[0].id).toBe('e1');
+            expect(loaded[0].monto).toBe(100);
+        } finally {
+            globalThis.indexedDB = original;
+        }
+    });
+
+    it('LS-only v6 (finanzas:migrated ausente, IDB vacío) → load() migra entries a IDB ciphertext, lsClear solo tras verify', { timeout: 30000 }, async () => {
+        await indexedDB.deleteDatabase('finanzas_personales_2026');
+        localStorage.setItem('finanzas:gastos:v1', JSON.stringify([
+            { id: 'e1', tipo: 'expense', monto: 100, categoria: 'Comida', descripcion: 'Almuerzo', fecha: '2026-08-01' }
+        ]));
+        localStorage.removeItem('finanzas:migrated');
+
+        await storage.initKey(TEST_PASSPHRASE);
+        const loaded = await storage.load();
+
+        // IDB tiene envelope
+        const db = await openRawDb();
+        const rows = await rawGetAll(db, 'entries');
+        expect(rows).toHaveLength(1);
+        expect(isEnvelopeLike(rows[0])).toBe(true);
+
+        // LS legacy purgado (lsClear después de decrypt-verify)
+        expect(localStorage.getItem('finanzas:gastos:v1')).toBeNull();
+        expect(localStorage.getItem('finanzas:migrated')).toBe('true');
+
+        // load() devuelve datos
+        expect(loaded).toHaveLength(1);
+    });
+});
+
+// --- 3.6 GREEN: migrateLsKeysWhenIdbDown implementado ---
+describe('storage: migrateLsKeysWhenIdbDown implementado', () => {
+    it('migrateLsKeysWhenIdbDown() cifra cada LS key legacy y verifica read-back', { timeout: 30000 }, async () => {
+        await indexedDB.deleteDatabase('finanzas_personales_2026');
+        localStorage.setItem('finanzas:gastos:v1', JSON.stringify([{ id: 'x1', monto: 10 }]));
+        localStorage.setItem('finanzas:budgets:v1', JSON.stringify({ cat: 20 }));
+        localStorage.setItem('finanzas:ai-settings:v1', JSON.stringify({ id: 'active', apiKey: 'sk-test' }));
+
+        await storage.initKey(TEST_PASSPHRASE);
+        await storage.migrateLsKeysWhenIdbDown();
+
+        // Todas las claves son ahora envelopes
+        for (const key of ['finanzas:gastos:v1', 'finanzas:budgets:v1', 'finanzas:ai-settings:v1']) {
+            const raw = JSON.parse(localStorage.getItem(key));
+            expect(isEnvelopeLike(raw)).toBe(true);
+        }
+
+        // Llamada idempotente: segunda vez no re-cifra (ya son envelopes)
+        await storage.migrateLsKeysWhenIdbDown();
+        for (const key of ['finanzas:gastos:v1', 'finanzas:budgets:v1', 'finanzas:ai-settings:v1']) {
+            const raw = JSON.parse(localStorage.getItem(key));
+            expect(isEnvelopeLike(raw)).toBe(true);
+        }
+    });
+
+    it('migrateLsKeysWhenIdbDown() no toca finanzas:dark-mode ni claves ya envelope', { timeout: 30000 }, async () => {
+        localStorage.setItem('finanzas:dark-mode', 'true');
+        localStorage.setItem('finanzas:gastos:v1', JSON.stringify({ v: 1, alg: 'AES-GCM-256', iv: 'a', ct: 'b', salt: 'c' })); // ya envelope
+
+        await storage.initKey(TEST_PASSPHRASE);
+        await storage.migrateLsKeysWhenIdbDown();
+
+        expect(localStorage.getItem('finanzas:dark-mode')).toBe('true');
+        // La clave ya envelope se mantiene igual
+        expect(localStorage.getItem('finanzas:gastos:v1')).toContain('AES-GCM-256');
+    });
+});
