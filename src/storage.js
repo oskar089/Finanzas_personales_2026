@@ -465,7 +465,10 @@ async function migrateFromLS(db) {
     });
 
     localStorage.setItem(LS_MIGRATED_KEY, 'true');
-    lsClear();
+    // NO limpiar LS aquí: la migración es lossless. El fallback LS plaintext debe
+    // sobrevivir hasta que migrateEncryption() cifre y verifique (DE12). Si el
+    // cifrado falla, load() rechaza y LS sigue siendo el respaldo íntegro.
+    // migrateEncryption() elimina/purga las claves LS por plan tras el verify.
 }
 
 // --- Migración v6→v7 (cifrado en reposo) -----------------------------------
@@ -626,13 +629,21 @@ async function migrateLsKeysWhenIdbDown() {
 async function idbGetCryptoMeta() {
     if (!isIDBAvailable()) return null;
     const db = await openDB();
-    const rows = await idbGetAllRaw(db, CRYPTO_META_STORE);
-    return rows.find(r => r.id === 'meta') || null;
+    try {
+        const rows = await idbGetAllRaw(db, CRYPTO_META_STORE);
+        return rows.find(r => r.id === 'meta') || null;
+    } finally {
+        db.close();
+    }
 }
 
 async function idbPutCryptoMeta(meta) {
     const db = await openDB();
-    await idbPutRaw(db, CRYPTO_META_STORE, { id: 'meta', ...meta });
+    try {
+        await idbPutRaw(db, CRYPTO_META_STORE, { id: 'meta', ...meta });
+    } finally {
+        db.close();
+    }
 }
 
 function lsLoadCryptoMeta() {
@@ -664,11 +675,15 @@ async function hasEncryptedData() {
         return false;
     }
     const db = await openDB();
-    for (const store of [STORE_NAME, BUDGETS_STORE, RECURRING_STORE, CUSTOM_CATEGORIES_STORE, AI_SETTINGS_STORE, SETTINGS_STORE]) {
-        const rows = await idbGetAllRaw(db, store);
-        if (rows.some(isEnvelope)) return true;
+    try {
+        for (const store of [STORE_NAME, BUDGETS_STORE, RECURRING_STORE, CUSTOM_CATEGORIES_STORE, AI_SETTINGS_STORE, SETTINGS_STORE]) {
+            const rows = await idbGetAllRaw(db, store);
+            if (rows.some(isEnvelope)) return true;
+        }
+        return false;
+    } finally {
+        db.close();
     }
-    return false;
 }
 
 async function initKey(passphrase) {
@@ -734,9 +749,19 @@ async function load() {
         return lsLoad();
     }
 
+    // Solo un fallo REAL de apertura de IndexedDB cae al fallback LS. Un fallo de
+    // MIGRACIÓN (p. ej. cifrado) must REJECTAR: la migración es lossless y aborta
+    // sin purgar el plaintext legacy, nunca devolviéndolo en claro (DE12).
+    let db;
     try {
-        const db = await openDB();
+        db = await openDB();
+    } catch {
+        // IDB no disponible de verdad: migrar claves LS y fallback
+        await migrateLsKeysWhenIdbDown();
+        return lsLoad();
+    }
 
+    try {
         // ¿Necesita migración legacy localStorage→IDB?
         const migrated = localStorage.getItem(LS_MIGRATED_KEY);
         if (!migrated) {
@@ -749,10 +774,8 @@ async function load() {
         const entries = await idbGetAll(db);
         // Normalizar: entries sin `tipo` son 'expense' (backward compat)
         return entries.map(e => ({ ...e, tipo: e.tipo || 'expense' }));
-    } catch {
-        // Si IndexedDB falla, migrar claves LS y luego fallback
-        await migrateLsKeysWhenIdbDown();
-        return lsLoad();
+    } finally {
+        db.close(); // cerrar la conexión (los stores migrados ya están persistidos)
     }
 }
 
@@ -765,9 +788,13 @@ async function save(entries) {
 
     try {
         const db = await openDB();
-        await idbClear(db);
-        if (entries.length > 0) {
-            await idbPutAll(db, entries);
+        try {
+            await idbClear(db);
+            if (entries.length > 0) {
+                await idbPutAll(db, entries);
+            }
+        } finally {
+            db.close();
         }
     } catch {
         // Fallback a localStorage si IndexedDB falla
@@ -783,7 +810,11 @@ async function clear() {
 
     try {
         const db = await openDB();
-        await idbClear(db);
+        try {
+            await idbClear(db);
+        } finally {
+            db.close();
+        }
     } catch {
         lsClear();
     }
@@ -798,11 +829,15 @@ async function loadBudgets() {
 
     try {
         const db = await openDB();
-        const budgets = await idbGetAllBudgets(db);
-        // Convertir array de {categoria, monto} a objeto {categoria: monto}
-        const result = {};
-        budgets.forEach(b => { result[b.categoria] = b.monto; });
-        return result;
+        try {
+            const budgets = await idbGetAllBudgets(db);
+            // Convertir array de {categoria, monto} a objeto {categoria: monto}
+            const result = {};
+            budgets.forEach(b => { result[b.categoria] = b.monto; });
+            return result;
+        } finally {
+            db.close();
+        }
     } catch {
         return lsLoadBudgets();
     }
@@ -816,11 +851,15 @@ async function saveBudgets(budgets) {
 
     try {
         const db = await openDB();
-        // Convertir objeto {categoria: monto} a array de {categoria, monto}
-        const arr = Object.entries(budgets).map(([categoria, monto]) => ({ categoria, monto }));
-        await idbClearBudgets(db);
-        if (arr.length > 0) {
-            await idbPutAllBudgets(db, arr);
+        try {
+            // Convertir objeto {categoria: monto} a array de {categoria, monto}
+            const arr = Object.entries(budgets).map(([categoria, monto]) => ({ categoria, monto }));
+            await idbClearBudgets(db);
+            if (arr.length > 0) {
+                await idbPutAllBudgets(db, arr);
+            }
+        } finally {
+            db.close();
         }
     } catch {
         await lsSaveBudgets(budgets);
@@ -836,8 +875,12 @@ async function loadRecurring() {
 
     try {
         const db = await openDB();
-        const recurring = await idbGetAllRecurring(db);
-        return recurring;
+        try {
+            const recurring = await idbGetAllRecurring(db);
+            return recurring;
+        } finally {
+            db.close();
+        }
     } catch {
         return lsLoadRecurring();
     }
@@ -851,9 +894,13 @@ async function saveRecurring(recurring) {
 
     try {
         const db = await openDB();
-        await idbClearRecurring(db);
-        if (recurring.length > 0) {
-            await idbPutAllRecurring(db, recurring);
+        try {
+            await idbClearRecurring(db);
+            if (recurring.length > 0) {
+                await idbPutAllRecurring(db, recurring);
+            }
+        } finally {
+            db.close();
         }
     } catch {
         await lsSaveRecurring(recurring);
@@ -869,7 +916,11 @@ async function loadCustomCategories() {
 
     try {
         const db = await openDB();
-        return await idbGetAllCustomCategories(db);
+        try {
+            return await idbGetAllCustomCategories(db);
+        } finally {
+            db.close();
+        }
     } catch {
         return lsLoadCustomCategories();
     }
@@ -883,9 +934,13 @@ async function saveCustomCategories(categories) {
 
     try {
         const db = await openDB();
-        await idbClearCustomCategories(db);
-        if (categories.length > 0) {
-            await idbPutAllCustomCategories(db, categories);
+        try {
+            await idbClearCustomCategories(db);
+            if (categories.length > 0) {
+                await idbPutAllCustomCategories(db, categories);
+            }
+        } finally {
+            db.close();
         }
     } catch {
         await lsSaveCustomCategories(categories);
@@ -901,7 +956,11 @@ async function loadAiSettings() {
 
     try {
         const db = await openDB();
-        return await idbGetAiSettings(db);
+        try {
+            return await idbGetAiSettings(db);
+        } finally {
+            db.close();
+        }
     } catch {
         return lsLoadAiSettings();
     }
@@ -916,12 +975,16 @@ async function saveAiSettings(settings) {
         }
         try {
             const db = await openDB();
-            const tx = db.transaction(AI_SETTINGS_STORE, 'readwrite');
-            tx.objectStore(AI_SETTINGS_STORE).delete('active');
-            await new Promise((resolve, reject) => {
-                tx.oncomplete = resolve;
-                tx.onerror = () => reject(tx.error);
-            });
+            try {
+                const tx = db.transaction(AI_SETTINGS_STORE, 'readwrite');
+                tx.objectStore(AI_SETTINGS_STORE).delete('active');
+                await new Promise((resolve, reject) => {
+                    tx.oncomplete = resolve;
+                    tx.onerror = () => reject(tx.error);
+                });
+            } finally {
+                db.close();
+            }
         } catch {
             // ignore
         }
@@ -939,10 +1002,14 @@ async function saveAiSettings(settings) {
 
     try {
         const db = await openDB();
-        // Dual-write: un solo encrypt, el MISMO envelope a IDB y al espejo LS (DE11)
-        const rec = await encryptAndRecord(AI_SETTINGS_STORE, record);
-        await idbPutRaw(db, AI_SETTINGS_STORE, rec);
-        localStorage.setItem(LS_AI_SETTINGS_KEY, JSON.stringify(rec));
+        try {
+            // Dual-write: un solo encrypt, el MISMO envelope a IDB y al espejo LS (DE11)
+            const rec = await encryptAndRecord(AI_SETTINGS_STORE, record);
+            await idbPutRaw(db, AI_SETTINGS_STORE, rec);
+            localStorage.setItem(LS_AI_SETTINGS_KEY, JSON.stringify(rec));
+        } finally {
+            db.close();
+        }
     } catch {
         const rec = await encryptAndRecord(AI_SETTINGS_STORE, record);
         localStorage.setItem(LS_AI_SETTINGS_KEY, JSON.stringify(rec));
@@ -958,7 +1025,11 @@ async function loadCurrencySettings() {
 
     try {
         const db = await openDB();
-        return await idbGetSettings(db);
+        try {
+            return await idbGetSettings(db);
+        } finally {
+            db.close();
+        }
     } catch {
         return lsLoadSettings();
     }
@@ -973,12 +1044,16 @@ async function saveCurrencySettings(settings) {
         }
         try {
             const db = await openDB();
-            const tx = db.transaction(SETTINGS_STORE, 'readwrite');
-            tx.objectStore(SETTINGS_STORE).delete('active');
-            await new Promise((resolve, reject) => {
-                tx.oncomplete = resolve;
-                tx.onerror = () => reject(tx.error);
-            });
+            try {
+                const tx = db.transaction(SETTINGS_STORE, 'readwrite');
+                tx.objectStore(SETTINGS_STORE).delete('active');
+                await new Promise((resolve, reject) => {
+                    tx.oncomplete = resolve;
+                    tx.onerror = () => reject(tx.error);
+                });
+            } finally {
+                db.close();
+            }
         } catch {
             // ignore
         }
@@ -996,10 +1071,14 @@ async function saveCurrencySettings(settings) {
 
     try {
         const db = await openDB();
-        // Dual-write: un solo encrypt, el MISMO envelope a IDB y al espejo LS (DE13)
-        const rec = await encryptAndRecord(SETTINGS_STORE, record);
-        await idbPutRaw(db, SETTINGS_STORE, rec);
-        localStorage.setItem(LS_SETTINGS_KEY, JSON.stringify(rec));
+        try {
+            // Dual-write: un solo encrypt, el MISMO envelope a IDB y al espejo LS (DE13)
+            const rec = await encryptAndRecord(SETTINGS_STORE, record);
+            await idbPutRaw(db, SETTINGS_STORE, rec);
+            localStorage.setItem(LS_SETTINGS_KEY, JSON.stringify(rec));
+        } finally {
+            db.close();
+        }
     } catch {
         const rec = await encryptAndRecord(SETTINGS_STORE, record);
         localStorage.setItem(LS_SETTINGS_KEY, JSON.stringify(rec));
@@ -1014,12 +1093,16 @@ async function clearCurrencySettings() {
 
     try {
         const db = await openDB();
-        const tx = db.transaction(SETTINGS_STORE, 'readwrite');
-        tx.objectStore(SETTINGS_STORE).delete('active');
-        await new Promise((resolve, reject) => {
-            tx.oncomplete = resolve;
-            tx.onerror = () => reject(tx.error);
-        });
+        try {
+            const tx = db.transaction(SETTINGS_STORE, 'readwrite');
+            tx.objectStore(SETTINGS_STORE).delete('active');
+            await new Promise((resolve, reject) => {
+                tx.oncomplete = resolve;
+                tx.onerror = () => reject(tx.error);
+            });
+        } finally {
+            db.close();
+        }
     } catch {
         // ignore
     }

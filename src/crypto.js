@@ -191,9 +191,15 @@ function isEncryptionReady() {
     return state.ready;
 }
 
+// Descarta el DEK/KEK en memoria (p. ej. bloquear sesión). No afecta los datos
+// persistidos: solo revierte la clave activa al estado "sin desbloquear".
+function reset() {
+    state = { ready: false, dek: null, salt: null, iterations: PBKDF2_ITERATIONS };
+}
+
 // --- Exports: window.fpCrypto (NUNCA window.crypto) + module.exports --------
 
-const publicApi = { init, changePassphrase, encryptPayload, decryptPayload, isEncryptionReady, assertSecureContext, toB64, fromB64 };
+const publicApi = { init, changePassphrase, encryptPayload, decryptPayload, isEncryptionReady, assertSecureContext, toB64, fromB64, reset };
 
 if (typeof module !== 'undefined' && module.exports) module.exports = publicApi;
 if (typeof window !== 'undefined') window.fpCrypto = publicApi; // no usar window.crypto: colisiona con el global de Web Crypto

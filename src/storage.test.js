@@ -5,11 +5,41 @@
 // =====================================================================
 
 import 'fake-indexeddb/auto';
-import { webcrypto } from 'node:crypto';
+import { webcrypto, createHash } from 'node:crypto';
 // jsdom solo expone un Crypto sin `subtle` (getReadOnly). Reemplazamos el global
 // por el webcrypto de Node para que el envelope (crypto.subtle) funcione aquí.
 Object.defineProperty(globalThis, 'crypto', { value: webcrypto, configurable: true, writable: true });
+
+// --- Fast deterministic PBKDF2 for tests -------------------------------------
+// PBKDF2 600k real vía Node webcrypto bajo jsdom tarda ~120s POR derivación, lo
+// que convierte la suite de migración en un hang. Para que los tests sean viables
+// mockeamos UNICAMENTE deriveBits del esquema PBKDF2: devolvemos 44 bytes
+// (= KDF_DKLEN*8 bits) deterministas del salt, al instante. El resto del envelope
+// (AES-GCM real, wrap/unwrap del DEK, salt fresco) queda intacto, y las aserciones
+// de `meta.iterations === 600000` siguen valiendo (no tocamos la constante).
+// Determinista por salt => wrap y unwrap del DEK coinciden; baseKey es irrelevante.
+const _realDeriveBits = globalThis.crypto.subtle.deriveBits.bind(globalThis.crypto.subtle);
+globalThis.crypto.subtle.deriveBits = async (algorithm, baseKey, length) => {
+    if (!algorithm || algorithm.name !== 'PBKDF2') return _realDeriveBits(algorithm, baseKey, length);
+    const saltBuf = algorithm.salt.buffer ? new Uint8Array(algorithm.salt.buffer, algorithm.salt.byteOffset, algorithm.salt.byteLength)
+        : new Uint8Array(algorithm.salt);
+    let h = createHash('sha256').update(saltBuf).update('fp-fake-kdf').digest(); // 32 bytes
+    const n = length / 8;
+    const out = Buffer.alloc(n);
+    let offset = 0;
+    while (offset < n) {
+        const chunk = h.subarray(0, Math.min(32, n - offset));
+        chunk.copy(out, offset);
+        offset += chunk.length;
+        h = createHash('sha256').update(h).digest();
+    }
+    return out;
+};
+
 import * as storage from './storage.js';
+// rawGetAll rawPut rawClear se usan en los tests de migración para inspeccionar
+// el estado crudo (sin descifrar) de los stores.
+const { rawGetAll, rawPut, rawClear } = storage;
 
 // Datos de prueba
 const sampleEntries = [
@@ -231,11 +261,7 @@ describe('storage: DB v7 expone el store cryptoMeta + los stores legacy (aditivo
     it('abre la DB v7 y expone cryptoMeta junto a los 6 stores legacy', async () => {
         // Disparar la migración real a través del módulo storage (openDB con DB_VERSION)
         await storage.loadAiSettings();
-        const db = await new Promise((resolve, reject) => {
-            const req = indexedDB.open('finanzas_personales_2026');
-            req.onsuccess = () => resolve(req.result);
-            req.onerror = () => reject(req.error);
-        });
+        const db = await openRawDb();
         expect(db.version).toBe(7);
         expect(db.objectStoreNames.contains('cryptoMeta')).toBe(true);
         // Migración aditiva: los stores existentes se preservan
@@ -298,10 +324,20 @@ describe('storage.saveCurrencySettings() / loadCurrencySettings()', () => {
 // -------------------------------------------------------------------
 // API de clave + cryptoMeta al reposo (DE1/DE2 a nivel storage, DB v7)
 // -------------------------------------------------------------------
+// Conexiones abiertas explícitamente por helpers de test: se cierran en
+// afterEach para que fake-indexeddb no bloquee deleteDatabase ni el version
+// change de openDB() por conexiones abiertas al mismo nombre de DB.
+const _openTestConns = [];
+function trackOpen(conn) { _openTestConns.push(conn); return conn; }
+afterEach(() => {
+    _openTestConns.forEach(c => { try { c.close(); } catch { /* ya cerrada */ } });
+    _openTestConns.length = 0;
+});
+
 function openRawDb() {
     return new Promise((resolve, reject) => {
         const req = indexedDB.open('finanzas_personales_2026');
-        req.onsuccess = () => resolve(req.result);
+        req.onsuccess = () => resolve(trackOpen(req.result));
         req.onerror = () => reject(req.error);
     });
 }
@@ -567,6 +603,12 @@ describe('storage: DE11/DE15 espejos idénticos y fallback LS puro', () => {
 
 // Helper para sembrar DB v6 legacy: crea DB v6 con 6 stores y datos plaintext
 async function seedLegacyV6() {
+    // Reiniciar el estado criptográfico EN MEMORIA: un usuario legacy v6 real aún
+    // no definió passphrase, así que initKey() posterior debe re-establecer y
+    // persistir el meta (el beforeEach global ya lo había dejado "ready").
+    window.fpCrypto.reset();
+    localStorage.removeItem('finanzas:crypto-meta:v1');
+
     // Borrar DB existente y abrir v6
     await indexedDB.deleteDatabase('finanzas_personales_2026');
     const db = await new Promise((resolve, reject) => {
@@ -630,12 +672,17 @@ async function seedLegacyV6() {
     // finanzas:migrated NO está seteado (simula primera migración)
     localStorage.removeItem('finanzas:migrated');
 
+    // Cerrar la conexión: la transacción ya completó y ningún caller usa `db`.
+    // Si quedara abierta, el upgrade v6→v7 de openDB() en load() se bloquearía
+    // (IndexedDB exige cerrar las demás conexiones antes de un version change).
+    db.close();
+
     return db;
 }
 
 // --- 3.1 RED: seedLegacyV6 + initKey + load() → DB v7, cryptoMeta, envelopes, lossless ---
 describe('storage: migración v6→v7 (DE12 lossless)', () => {
-    it('seedLegacyV6 + initKey + load() produce DB v7 con cryptoMeta y todos los stores como envelopes', { timeout: 120000 }, async () => {
+    it('seedLegacyV6 + initKey + load() produce DB v7 con cryptoMeta y todos los stores como envelopes', { timeout: 30000 }, async () => {
         await seedLegacyV6();
         await storage.initKey(TEST_PASSPHRASE);
         const loaded = await storage.load();
@@ -689,8 +736,7 @@ describe('storage: migración v6→v7 purge-after-verify (DE12)', () => {
         await storage.initKey(TEST_PASSPHRASE);
 
         // Spy que falla en el PRIMER store (entries)
-        const originalEncrypt = storage.fpCrypto?.encryptPayload || (await import('./crypto.js')).default?.encryptPayload;
-        // Usamos vi.spyOn sobre window.fpCrypto que es lo que storage usa en browser
+        // vi.spyOn sobre window.fpCrypto (el mismo objeto que storage capturó en carga)
         const spy = vi.spyOn(window.fpCrypto, 'encryptPayload').mockRejectedValueOnce(new Error('boom'));
 
         // load() debe RECHAZAR con error de migración (no "starts empty")
