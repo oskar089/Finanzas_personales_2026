@@ -508,6 +508,174 @@ function setupCurrencySettingsModal() {
     }
 }
 
+// --- Boot: gate de cifrado (passphrase) ------------------------------
+// El arranque queda tras la clave (DE4): nada se carga ni se escribe hasta
+// que cryptoGate() resuelve. checkAndGenerateRecurring() (escribe en boot)
+// corre solo post-clave, así que no hay escrituras en claro.
+
+// Resuelve la promesa de cryptoGate() cuando el usuario desbloquea.
+let gateResolve = null;
+
+async function cryptoGate() {
+    // (1) Contexto seguro (DE3): sin crypto.subtle el boot se rechaza con
+    //     panel de bloqueo; cero cargas y cero escrituras (ni migración).
+    try {
+        window.fpCrypto.assertSecureContext();
+    } catch {
+        document.getElementById('secureContextError').classList.remove('d-none');
+        return false;
+    }
+
+    // (2) Decide setup vs unlock según la clave persistida (DE4).
+    const state = window.FPBoot.determineBootState({
+        hasKey: await window.storage.hasEncryptionKey(),
+        isReady: window.fpCrypto.isEncryptionReady(),
+        secureContext: true
+    });
+    if (state === 'ready') return true; // ya desbloqueada en este arranque
+
+    const isSetup = state === 'setup';
+    document.getElementById('passphraseError').textContent = '';
+    document.getElementById('passphraseModalTitle').textContent = isSetup ? 'Configurar contraseña' : 'Desbloquear';
+    document.getElementById('passphraseSetupFields').classList.toggle('d-none', !isSetup);
+    document.getElementById('passphraseUnlockFields').classList.toggle('d-none', isSetup);
+    document.getElementById('btnSetPassphrase').classList.toggle('d-none', !isSetup);
+    document.getElementById('btnUnlock').classList.toggle('d-none', isSetup);
+    document.getElementById('btnOpenChangePassphrase').classList.toggle('d-none', isSetup);
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('passphraseModal')).show();
+
+    // (3) Espera el submit; initKey resuelve esta promesa con true.
+    return new Promise((resolve) => { gateResolve = resolve; });
+}
+
+async function submitPassphrase() {
+    const errorEl = document.getElementById('passphraseError');
+    errorEl.textContent = '';
+    const isSetup = !document.getElementById('passphraseSetupFields').classList.contains('d-none');
+    const pass = isSetup
+        ? document.getElementById('newPassphrase').value
+        : document.getElementById('unlockPassphrase').value;
+
+    if (isSetup) {
+        const confirm = document.getElementById('confirmPassphrase').value;
+        if (pass !== confirm) {
+            errorEl.textContent = 'Las contraseñas no coinciden.';
+            return;
+        }
+    }
+
+    try {
+        await window.storage.initKey(pass);
+    } catch (err) {
+        // DE5: error inline, modal permanece, datos intactos, retry infinito
+        // (decisión de producto 1: sin reset destructivo en el unlock).
+        errorEl.textContent = window.FPBoot.errorToInlineMessage(err);
+        return;
+    }
+
+    // Éxito: ocultar modal, limpiar campos y resolver el gate.
+    bootstrap.Modal.getInstance(document.getElementById('passphraseModal')).hide();
+    ['newPassphrase', 'confirmPassphrase', 'unlockPassphrase'].forEach(id => {
+        document.getElementById(id).value = '';
+    });
+    if (isSetup) showRecoveryWarningOnce(); // aviso DE10 único tras el primer setup
+    const resolve = gateResolve;
+    gateResolve = null;
+    if (resolve) resolve(true);
+}
+
+// Aviso DE10 one-time (flag de metadata en claro, fuera del cifrado igual
+// que finanzas:dark-mode/finanzas:migrated): la passphrase es irrecuperable.
+function showRecoveryWarningOnce() {
+    if (localStorage.getItem('finanzas:recovery-warned')) return;
+    localStorage.setItem('finanzas:recovery-warned', '1');
+    toast.showWarning('Si perdés la contraseña, tus datos son irrecuperables. Exportá regularmente a Excel (📥 Exportar) como respaldo.');
+}
+
+function setupPassphraseModal() {
+    const modalEl = document.getElementById('passphraseModal');
+    if (!modalEl) return;
+
+    // Envío de setup y unlock (mismo flujo: valida → initKey vía cryptoGate).
+    document.getElementById('btnSetPassphrase').addEventListener('click', submitPassphrase);
+    document.getElementById('btnUnlock').addEventListener('click', submitPassphrase);
+    ['newPassphrase', 'confirmPassphrase', 'unlockPassphrase'].forEach(id => {
+        document.getElementById(id).addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                submitPassphrase();
+            }
+        });
+    });
+
+    // Escape "cambiar contraseña" desde el unlock (el navbar ahora Bloquea).
+    document.getElementById('btnOpenChangePassphrase').addEventListener('click', () => {
+        bootstrap.Modal.getInstance(modalEl).hide();
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('changePassphraseModal')).show();
+    });
+
+    // Al reabrir, el foco va al input de contraseña del modo activo.
+    modalEl.addEventListener('shown.bs.modal', () => {
+        const target = document.getElementById('passphraseSetupFields').classList.contains('d-none')
+            ? document.getElementById('unlockPassphrase')
+            : document.getElementById('newPassphrase');
+        if (target) target.focus();
+    });
+}
+
+function setupChangePassphraseModal() {
+    const modalEl = document.getElementById('changePassphraseModal');
+    if (!modalEl) return;
+
+    async function submitChange() {
+        const errorEl = document.getElementById('changePassphraseError');
+        errorEl.textContent = '';
+        const cur = document.getElementById('changeCurrent').value;
+        const next = document.getElementById('changeNew').value;
+        const confirm = document.getElementById('changeConfirm').value;
+
+        if (next.length < 8) {
+            errorEl.textContent = 'La contraseña debe tener mínimo 8 caracteres.';
+            return;
+        }
+        if (next !== confirm) {
+            errorEl.textContent = 'Las contraseñas nuevas no coinciden.';
+            return;
+        }
+
+        try {
+            // DE6: re-autentica y re-envuelve la DEK; los payloads nunca se re-cifran.
+            // crypto.js exige sesión activa (state.ready); si venimos del flujo
+            // bloqueado (🔐 Bloquear → unlock → "Cambiar contraseña"), primero
+            // desbloqueamos con `cur` — si es incorrecta, WrongPassphraseError
+            // cae al catch y el modal permanece (DE5, retry infinito).
+            if (!window.fpCrypto.isEncryptionReady()) {
+                await window.storage.initKey(cur); // no persiste nada: solo activa estado
+            }
+            await window.storage.changePassphrase(cur, next);
+        } catch (err) {
+            errorEl.textContent = window.FPBoot.errorToInlineMessage(err);
+            return; // modal permanece abierto; datos intactos
+        }
+
+        ['changeCurrent', 'changeNew', 'changeConfirm'].forEach(id => {
+            document.getElementById(id).value = '';
+        });
+        bootstrap.Modal.getInstance(modalEl).hide();
+        toast.showSuccess('Contraseña actualizada');
+    }
+
+    document.getElementById('btnChangePassphrase').addEventListener('click', submitChange);
+    ['changeCurrent', 'changeNew', 'changeConfirm'].forEach(id => {
+        document.getElementById(id).addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                submitChange();
+            }
+        });
+    });
+}
+
 // --- Auto-categorización con IA --------------------------------------
 
 function getActiveModelName() {
@@ -1653,6 +1821,25 @@ function importXLSX(file) {
 // --- Eventos ------------------------------------------------------
 
 async function init() {
+    // Wiring temprano de los modales de boot: DEBE correr ANTES del gate.
+    // Si se registrara después (junto a setupBudgetModal y amigos), el setup
+    // del primer arranque quedaría detrás del propio gate que tiene que
+    // resolver → deadlock (btnSetPassphrase sin handler).
+    setupPassphraseModal();
+    setupChangePassphraseModal();
+
+    // 🔐 Bloquear (decisión de producto 2): dropea la DEK en memoria y vuelve
+    // a correr cryptoGate() → re-prompt de unlock; los datos persistidos NO
+    // se tocan (fpCrypto.reset() solo revierte la clave activa).
+    document.getElementById('btnPassphrase').addEventListener('click', async () => {
+        window.fpCrypto.reset();
+        await cryptoGate();
+    });
+
+    // Gate de cifrado: sin passphrase resuelta nada se carga ni se escribe
+    // (DE4). checkAndGenerateRecurring() corre después → solo post-clave.
+    if (!(await cryptoGate())) return;
+
     await loadFromStorage();
     await loadBudgets();
     await loadRecurring();

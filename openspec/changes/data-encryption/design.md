@@ -99,8 +99,11 @@ A new `src/crypto.js` module (pure Web Crypto layer, no DOM, no persistence) imp
 | `src/storage.test.js` | **Modify** | Inject `node:crypto` subtle; `initKey` in beforeEach; ciphertext-at-rest asserts; DB v7 assert; dual-write + fallback encryption; seeded v6→v7 migration suite (DE11–DE15) |
 | `app.js` | **Modify** | `cryptoGate()` before `loadFromStorage()` in `init()`; passphrase modal handlers; change-passphrase handler; secure-context block panel; no-recovery warning + Excel-export reminder |
 | `index.html` | **Modify** | `<script src="src/crypto.js">` before `src/storage.js`; `🔐 Clave` navbar button; `#passphraseModal` (static backdrop, not dismissible), `#changePassphraseModal`, `#secureContextError` panel |
+| `src/boot.js` | **Create** | PR4 decomposition — pure boot-state module: `determineBootState({hasKey,isReady,secureContext})` → `'setup'\|'unlock'\|'ready'\|'secure-context-error'` and `errorToInlineMessage(err)` (maps `WrongPassphraseError`/`PassphraseTooShortError`/`SecureContextError`/generic → inline Spanish messages). Dual export (`window.FPBoot` + `module.exports`) so `cryptoGate()` in `app.js` injects the decision. Internal implementation detail, not a new spec contract |
+| `src/boot.test.js` | **Create** | PR4 TDD suite (jsdom): `determineBootState` decision matrix (all 4 states + precedence overrides) and `errorToInlineMessage` mapping + leak-prevention negatives |
+| `sw.js` | **Modify** | Precache list gains `'/src/crypto.js'` and `'/src/boot.js'` (offline NFR — without them offline boot serves storage.js/app.js without `window.fpCrypto`/`window.FPBoot`) |
 
-`sw.js`, `server.js`, `src/finance.js`, `src/ai-providers.js` untouched (static-asset cache; data never flows through Cache API).
+`server.js`, `src/finance.js`, `src/ai-providers.js` untouched (static-asset cache; data never flows through Cache API). `sw.js` is touched only for precache (data never flows through Cache API).
 
 ## Key Functions — Pseudocode
 
@@ -263,12 +266,14 @@ async function migrateEncryption(db) { // called from load(); idempotent per sto
 - **`load()` order (v7)**: `assertKeyReady()` → `openDB()` → `migrateFromLS` (if `finanzas:migrated` absent) → `migrateEncryption(db)` → `idbGetAll` (decrypt) → normalize (`tipo || 'expense'`). `save*` = `assertKeyReady()` → clear → `idbPutAll` (ciphertext) → LS fallback/dual-write via envelope-aware `lsSave*`.
 - Exports append: `initKey, changePassphrase, hasEncryptionKey` to `module.exports` and `window.storage`.
 
-## Boot UX & Modal Wiring (`app.js`, `index.html`)
+## Boot UX & Modal Wiring (`app.js`, `index.html`, `src/boot.js`)
 
+- **PR4 decomposition**: the boot decision logic is extracted to `src/boot.js` (pure, dual-export `window.FPBoot` + `module.exports`): `determineBootState({hasKey, isReady, secureContext})` returns `'setup'|'unlock'|'ready'|'secure-context-error'` (precedence: secure-context-error → ready → hasKey ? unlock : setup) and `errorToInlineMessage(err)` maps `WrongPassphraseError`/`PassphraseTooShortError`/`SecureContextError`/generic to fixed inline Spanish messages (never leaks `err.message`). `cryptoGate()` in `app.js` consumes `window.FPBoot`; this extraction keeps the branching boot logic jsdom-testable (strict TDD) instead of relying on the manual checklist alone.
 - `init()` (app.js:1655) gains `if (!(await cryptoGate())) return;` before `loadFromStorage()` (line 1656). `checkAndGenerateRecurring()` (writes at boot) therefore runs only after key resolution — no plaintext write.
-- `cryptoGate()`: (1) `fpCrypto.assertSecureContext()` fails → show `#secureContextError` block panel (DE3: refuse to start, no loads, no silent plaintext); (2) `storage.hasEncryptionKey()` → open `#passphraseModal` in *setup* (first boot: passphrase + confirm + warning) or *unlock* mode (passphrase only); (3) submit → `await storage.initKey(pass)`; on `WrongPassphraseError` show "Contraseña incorrecta" inline and stay open (DE5, data untouched); on success hide modal and proceed.
-- Modal markup: `#passphraseModal` with `data-bs-backdrop="static" data-bs-keyboard="false"` (boot cannot proceed without it); placed after `#currencySettingsModal` (index.html:512). Navbar: `🔐 Clave` button (`btnPassphrase`, after `btnCurrencySettings`, line 26) opening `#changePassphraseModal` (current + new + confirm; `await storage.changePassphrase(cur, next)` → success toast; payloads untouched — DE6).
+- `cryptoGate()`: (1) `fpCrypto.assertSecureContext()` fails → show `#secureContextError` block panel (DE3: refuse to start, no loads, no silent plaintext); (2) `storage.hasEncryptionKey()` + `determineBootState` → open `#passphraseModal` in *setup* (first boot: passphrase + confirm + warning) or *unlock* mode (passphrase only); (3) submit → `await storage.initKey(pass)`; on `WrongPassphraseError` show "Contraseña incorrecta" inline and stay open, retry infinite (DE5, data untouched); on success hide modal; setup mode → one-time DE10 toast (plaintext flag `finanzas:recovery-warned`, metadata — out of scope).
+- Modal markup: `#passphraseModal` with `data-bs-backdrop="static" data-bs-keyboard="false"` (boot cannot proceed without it); placed after `#currencySettingsModal` (index.html:512). Navbar: `🔐 Bloquear` button (`id="btnPassphrase"`, after `btnCurrencySettings`, line 26) is the **session lock** — its handler calls `window.fpCrypto.reset()` (drops the DEK from memory, returns to unlock state, never touches persisted data — decision 2), then re-runs `cryptoGate()` (re-prompts unlock). A separate `#btnOpenChangePassphrase` (on the unlock modal) opens `#changePassphraseModal` (current + new + confirm; `setupChangePassphraseModal()` validates new ≥8 + confirm match, `await storage.changePassphrase(cur, next)` → success toast; payloads untouched — DE6; if `!fpCrypto.isEncryptionReady()`, calls `initKey(cur)` first to avoid `EncryptionNotReadyError` when changing from the locked flow).
 - DE10 warning in BOTH modals and as a one-time toast after first-boot setup: "Si perdés la contraseña, tus datos son irrecuperables. Exportá regularmente a Excel (📥 Exportar) como respaldo." `finanzas:dark-mode` stays plaintext and synchronous (untouched).
+- **Wiring order**: `setupPassphraseModal()` + `setupChangePassphraseModal()` are registered in `init()` BEFORE `cryptoGate()` is awaited — this avoids a boot deadlock where the modal handlers don't exist yet when the gate needs them.
 
 ## Testing Strategy (STRICT TDD — RED first per file)
 
@@ -276,7 +281,8 @@ async function migrateEncryption(db) { // called from load(); idempotent per sto
 |------|-------------|----------|
 | `src/crypto.test.js` (new) | `// @vitest-environment node` (Node ≥24 global `crypto.subtle`) | Pure crypto suite, no DOM, no fake-indexeddb |
 | `src/storage.test.js` (modified) | jsdom (default) + `import 'fake-indexeddb/auto'` + **inject subtle**: `import { webcrypto } from 'node:crypto'; globalThis.crypto.subtle = webcrypto.subtle;` at top (jsdom 29 exposes only getRandomValues/randomUUID) | Round-trips, ciphertext-at-rest, migration. `beforeEach: await storage.initKey(TEST_PASSPHRASE)` (first call creates meta; later calls unwrap the same key) |
-| Boot/UX flow | Manual (Playwright available) | Modal gate, wrong-passphrase retry, change-passphrase modal |
+| `src/boot.test.js` (new, PR4) | jsdom (default) | `determineBootState` decision matrix (4 states + precedence overrides) and `errorToInlineMessage` mapping + leak-prevention negatives — exact-value asserts |
+| Boot/UX flow (manual glue) | Manual (Playwright available) | Modal gate, wrong-passphrase retry, change-passphrase modal, session lock — DOM/Bootstrap glue not unit-tested; decision logic covered by `src/boot.test.js` |
 
 Mapping (all 15 requirements covered):
 
