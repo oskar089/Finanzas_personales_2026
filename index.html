@@ -16,6 +16,18 @@
 </head>
 <body class="bg-body-tertiary">
 
+    <!-- Panel de contexto no seguro (DE3): bloquea el contenido de la app;
+         el boot se rechaza sin crypto.subtle, sin cargas ni escrituras -->
+    <div id="secureContextError" class="d-none position-fixed top-0 start-0 end-0 bottom-0 bg-body-tertiary" style="z-index: 2080">
+        <div class="h-100 d-flex align-items-center justify-content-center text-center p-4">
+            <div>
+                <h2 class="h4 mb-3">🔒 Se requiere un contexto seguro</h2>
+                <p class="text-muted mb-2">El cifrado de tus datos no puede iniciarse en este contexto (falta <code>crypto.subtle</code>).</p>
+                <p class="small text-muted mb-0">Abrí la app desde <code>http://localhost:3000</code> o desde una dirección <code>HTTPS</code> (p. ej. GitHub Pages).</p>
+            </div>
+        </div>
+    </div>
+
     <nav class="navbar navbar-expand-lg bg-body-tertiary border-bottom mb-4">
         <div class="container">
             <span class="navbar-brand mb-0 h1">💰 Finanzas Personales 2026</span>
@@ -24,6 +36,7 @@
                 <button type="button" id="btnInstallPWA" class="btn btn-outline-success btn-sm d-none" title="Instalar app en tu dispositivo">📲 Instalar</button>
                 <button type="button" id="btnAiSettings" class="btn btn-outline-secondary btn-sm" title="Configurar IA" data-bs-toggle="modal" data-bs-target="#aiSettingsModal">⚙️ IA</button>
                 <button type="button" id="btnCurrencySettings" class="btn btn-outline-secondary btn-sm" title="Configurar moneda" data-bs-toggle="modal" data-bs-target="#currencySettingsModal">⚙️ Ajustes</button>
+                <button type="button" id="btnPassphrase" class="btn btn-outline-secondary btn-sm" title="Bloquear la sesión (los datos quedan cifrados)">🔐 Bloquear</button>
                 <button type="button" id="btnDarkMode" class="btn btn-outline-secondary btn-sm" title="Modo oscuro">🌙</button>
             </div>
         </div>
@@ -511,12 +524,84 @@
         </div>
     </div>
 
+    <!-- Modal Passphrase (gate de boot): setup o unlock según el estado;
+         no descartable (backdrop static) porque el boot no sigue sin él -->
+    <div class="modal fade" id="passphraseModal" tabindex="-1" aria-labelledby="passphraseModalTitle" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="passphraseModalTitle">Configurar contraseña</h5>
+                </div>
+                <div class="modal-body">
+                    <p class="text-muted small mb-3">Tus datos se cifran con una contraseña que se pide en cada inicio.</p>
+                    <div id="passphraseSetupFields">
+                        <div class="mb-3">
+                            <label for="newPassphrase" class="form-label">Nueva contraseña</label>
+                            <input type="password" id="newPassphrase" class="form-control" minlength="8" required autocomplete="new-password">
+                        </div>
+                        <div class="mb-3">
+                            <label for="confirmPassphrase" class="form-label">Repetí la contraseña</label>
+                            <input type="password" id="confirmPassphrase" class="form-control" minlength="8" required autocomplete="new-password">
+                        </div>
+                    </div>
+                    <div id="passphraseUnlockFields" class="d-none">
+                        <div class="mb-3">
+                            <label for="unlockPassphrase" class="form-label">Contraseña</label>
+                            <input type="password" id="unlockPassphrase" class="form-control" required autocomplete="current-password">
+                        </div>
+                    </div>
+                    <div id="passphraseError" class="text-danger small mb-2" role="alert"></div>
+                    <div class="alert alert-warning small mb-0">⚠️ Si perdés la contraseña, tus datos son irrecuperables. Exportá regularmente a Excel (📥 Exportar) como respaldo.</div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary d-none" id="btnOpenChangePassphrase">🔑 Cambiar contraseña</button>
+                    <button type="button" class="btn btn-primary d-none" id="btnUnlock">Desbloquear</button>
+                    <button type="button" class="btn btn-primary" id="btnSetPassphrase">Configurar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Cambiar contraseña (DE6: re-envuelve la DEK, nunca re-cifra) -->
+    <div class="modal fade" id="changePassphraseModal" tabindex="-1" aria-labelledby="changePassphraseModalLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="changePassphraseModalLabel">🔑 Cambiar contraseña</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="changeCurrent" class="form-label">Contraseña actual</label>
+                        <input type="password" id="changeCurrent" class="form-control" required autocomplete="current-password">
+                    </div>
+                    <div class="mb-3">
+                        <label for="changeNew" class="form-label">Nueva contraseña</label>
+                        <input type="password" id="changeNew" class="form-control" minlength="8" required autocomplete="new-password">
+                    </div>
+                    <div class="mb-3">
+                        <label for="changeConfirm" class="form-label">Repetí la nueva contraseña</label>
+                        <input type="password" id="changeConfirm" class="form-control" minlength="8" required autocomplete="new-password">
+                    </div>
+                    <div id="changePassphraseError" class="text-danger small mb-2" role="alert"></div>
+                    <div class="alert alert-warning small mb-0">⚠️ Si perdés la contraseña, tus datos son irrecuperables. Exportá regularmente a Excel (📥 Exportar) como respaldo.</div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="button" class="btn btn-primary" id="btnChangePassphrase">Guardar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Bootstrap 5.3 JS bundle (popper included) -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js" integrity="sha384-C6RzsynM9kWDrMNeT87bh95OGNyZPhcTNXj1NW7RuBCsyN/o0jlpcV8Qyq46cDfL" crossorigin="anonymous"></script>
     <script src="src/finance.js"></script>
+    <script src="src/crypto.js"></script>
     <script src="src/storage.js"></script>
     <script src="src/toast.js"></script>
     <script src="src/ai-providers.js"></script>
+    <script src="src/boot.js"></script>
     <script src="app.js"></script>
     <script>
         if ('serviceWorker' in navigator) {

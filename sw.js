@@ -12,6 +12,8 @@ const ASSETS = [
     '/styles.css',
     '/app.js',
     '/src/finance.js',
+    '/src/crypto.js',
+    '/src/boot.js',
     '/src/storage.js',
     '/vendor/xlsx.full.min.js',
     'https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css',
