@@ -200,7 +200,7 @@ describe('Portabilidad (DE9)', () => {
 
 // --- Exports: module.exports (node) y window.fpCrypto (navegador) ----------
 describe('Exports', () => {
-    const SURFACE = ['assertSecureContext', 'changePassphrase', 'decryptPayload', 'encryptPayload', 'fromB64', 'init', 'isEncryptionReady', 'toB64'];
+    const SURFACE = ['assertSecureContext', 'changePassphrase', 'decryptPayload', 'encryptPayload', 'fromB64', 'init', 'isEncryptionReady', 'reset', 'toB64'];
 
     it('module.exports expone las 6 funciones públicas + toB64/fromB64', async () => {
         const mod = await freshModule();
