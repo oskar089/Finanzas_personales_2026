@@ -38,8 +38,10 @@ function errorToInlineMessage(err) {
 }
 
 // --- Exports: window.FPBoot + module.exports ------------------------
+// Ojo: el binding debe ser único (const top-level compartido entre scripts
+// clásicos); crypto.js ya usa `publicApi` y redeclararlo rompería el parseo.
 
-const publicApi = { determineBootState, errorToInlineMessage };
+const bootApi = { determineBootState, errorToInlineMessage };
 
-if (typeof module !== 'undefined' && module.exports) module.exports = publicApi;
-if (typeof window !== 'undefined') window.FPBoot = publicApi;
+if (typeof module !== 'undefined' && module.exports) module.exports = bootApi;
+if (typeof window !== 'undefined') window.FPBoot = bootApi;
