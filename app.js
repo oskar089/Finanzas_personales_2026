@@ -1075,6 +1075,11 @@ function renderCharts() {
         chartEmpty.classList.remove('d-none');
         document.getElementById('chartExpenses').classList.add('d-none');
         document.getElementById('chartIncome').classList.add('d-none');
+        // Destruir también las instancias previas: si quedaban charts con
+        // datos de antes del bloqueo, deben liberarse (no dejar datos en
+        // memoria inspeccionables por DevTools).
+        if (chartExpenses) { chartExpenses.destroy(); chartExpenses = null; }
+        if (chartIncome) { chartIncome.destroy(); chartIncome = null; }
         return;
     }
 
@@ -1833,7 +1838,30 @@ async function init() {
     // se tocan (fpCrypto.reset() solo revierte la clave activa).
     document.getElementById('btnPassphrase').addEventListener('click', async () => {
         window.fpCrypto.reset();
-        await cryptoGate();
+
+        // Limpiar datos sensibles de memoria y DOM pintado (tabla, gráficos,
+        // resumen, dashboard, budgets, recurrentes): al bloquear la clave ya
+        // no se puede usar, así que no debe quedar NADA en pantalla ni en
+        // memoria inspeccionable desde DevTools ni visible tras el backdrop.
+        entries = [];
+        budgets = {};
+        recurring = [];
+        customCategories = [];
+        aiSettings = null;
+        editingId = null;
+        render();
+
+        // Re-prompt de unlock (DE4): recién tras desbloquear se recargan los
+        // datos, replicando la carga del boot inicial.
+        if (!(await cryptoGate())) return;
+
+        await loadFromStorage();
+        await loadBudgets();
+        await loadRecurring();
+        await loadCustomCategoriesFromStorage();
+        await loadAiSettingsFromStorage();
+        await loadCurrencySettingsFromStorage();
+        render();
     });
 
     // Gate de cifrado: sin passphrase resuelta nada se carga ni se escribe
