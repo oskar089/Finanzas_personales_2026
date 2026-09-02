@@ -22,8 +22,8 @@ A Progressive Web App to track personal finances (expenses, income and savings) 
 - Dark mode.
 - **Export to Excel (.xlsx)** with formatted columns and totals.
 - **Import from Excel (.xlsx/.xls)** with validation.
-- Data stored in the browser (IndexedDB with localStorage fallback). It never leaves your machine.
-- **Important**: If you clear browser data or uninstall the app, all data is lost. Export to Excel regularly as backup.
+- **Encrypted at rest**: all data (entries, budgets, recurring, categories and the AI API key) is encrypted with AES-GCM-256 using a passphrase. Stored in the browser (IndexedDB with localStorage mirror). It never leaves your machine without your key.
+- **Important**: If you clear browser data, uninstall the app, or lose your passphrase, the data is unrecoverable. Export to Excel regularly as backup.
 - **Multi-currency support**: 8 currencies (EUR, USD, GBP, ARS, MXN, BRL, JPY, CHF) with EUR as the fixed base. Amounts are always stored in EUR and converted only for display, with manual or live (Frankfurter) exchange rates.
 - **PWA install prompt**: install button shown via the `beforeinstallprompt` event (`manifest.json` with `display: standalone` and a Service Worker that precaches assets).
 - Service Worker for offline support (network-first for local assets, cache-first for CDN).
@@ -83,7 +83,7 @@ ollama serve
 npx vitest run
 ```
 
-183 tests covering pure functions in the `src/` layer (finance, storage, ai-providers) and storage logic.
+235 tests covering pure functions in the `src/` layer (finance, storage, crypto, boot, ai-providers) and storage logic.
 
 ## Design Decisions
 
@@ -98,5 +98,4 @@ npx vitest run
 
 ## Possible Future Improvements
 
-- Data encryption in IndexedDB.
-- Cloud sync (OneDrive / Google Drive via API).
+- Cloud sync (OneDrive / Google Drive via API). The portable encrypted envelope already supports cross-device recovery: any device with `crypto.subtle` and the passphrase can decrypt a synced blob.
