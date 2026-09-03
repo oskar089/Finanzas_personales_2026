@@ -22,6 +22,7 @@ A Progressive Web App to track personal finances (expenses, income and savings) 
 - Dark mode.
 - **Export to Excel (.xlsx)** with formatted columns and totals.
 - **Import from Excel (.xlsx/.xls)** with validation.
+- **Manual encrypted backup (.fpkg)**: export/import a portable encrypted bundle with all stores (export/import buttons in the toolbar). Useful for cross-device or cloud recovery — any device with the passphrase can decrypt it.
 - **Encrypted at rest**: all data (entries, budgets, recurring, categories and the AI API key) is encrypted with AES-GCM-256 using a passphrase. Stored in the browser (IndexedDB with localStorage mirror). It never leaves your machine without your key.
 - **Important**: If you clear browser data, uninstall the app, or lose your passphrase, the data is unrecoverable. Export to Excel regularly as backup.
 - **Multi-currency support**: 8 currencies (EUR, USD, GBP, ARS, MXN, BRL, JPY, CHF) with EUR as the fixed base. Amounts are always stored in EUR and converted only for display, with manual or live (Frankfurter) exchange rates.
@@ -83,7 +84,7 @@ ollama serve
 npx vitest run
 ```
 
-235 tests covering pure functions in the `src/` layer (finance, storage, crypto, boot, ai-providers) and storage logic.
+264 tests covering pure functions in the `src/` layer (finance, storage, crypto, boot, ai-providers) and the storage/cloud-sync logic.
 
 ## Design Decisions
 
@@ -98,4 +99,4 @@ npx vitest run
 
 ## Possible Future Improvements
 
-- Cloud sync (OneDrive / Google Drive via API). The portable encrypted envelope already supports cross-device recovery: any device with `crypto.subtle` and the passphrase can decrypt a synced blob.
+- Automate cloud sync (OneDrive / Google Drive via API). The manual `.fpkg` backup already supports cross-device recovery: any device with `crypto.subtle` and the passphrase can decrypt a backup bundle.
