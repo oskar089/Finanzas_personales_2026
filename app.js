@@ -696,6 +696,10 @@ async function autoCategorize() {
 
     const categories = getMergedCategories().map(c => `"${c}"`).join(', ');
 
+    // Timeout de 30s: abortar la request si el proveedor no responde a tiempo
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000);
+
     try {
         const response = await aiProviders.chatCompletion([
             {
@@ -706,7 +710,7 @@ async function autoCategorize() {
                 role: 'user',
                 content: `Clasificá este gasto o ingreso en UNA de estas categorías: ${categories}.\nDescripción: "${desc}"`
             }
-        ], { temperature: 0.1, max_tokens: 20 });
+        ], { temperature: 0.1, max_tokens: 20, signal: controller.signal });
 
         let suggestion = response.text.trim()
             .replace(/^["'*]+|["'*.]+$/g, '')    // saca comillas/asteriscos al inicio/fin
@@ -737,6 +741,7 @@ async function autoCategorize() {
             : `No se pudo conectar con la IA. Verificá la configuración del proveedor.`;
         toast.showError(msg);
     } finally {
+        clearTimeout(timeoutId);
         btn.disabled = false;
         btn.textContent = '🧠 Auto';
     }
@@ -1299,11 +1304,15 @@ Respondé en español, formato:
 2. [Consejo concreto con número]
 ...`;
 
+    // Timeout de 60s: abortar la request si el proveedor no responde a tiempo
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 60000);
+
     try {
         const response = await aiProviders.chatCompletion([
             { role: 'system', content: 'Sos un asistente financiero personal experto.' },
             { role: 'user', content: prompt }
-        ], { temperature: 0.3, max_tokens: 500 });
+        ], { temperature: 0.3, max_tokens: 500, signal: controller.signal });
 
         const text = response.text;
 
@@ -1337,6 +1346,7 @@ Respondé en español, formato:
         loadingEl.classList.add('d-none');
         emptyEl.classList.remove('d-none');
     } finally {
+        clearTimeout(timeoutId);
         btn.disabled = false;
     }
 }
@@ -1868,6 +1878,11 @@ async function init() {
     // (DE4). checkAndGenerateRecurring() corre después → solo post-clave.
     if (!(await cryptoGate())) return;
 
+    // Botones de backup habilitados solo si hay clave de cifrado activa
+    const hasKey = await window.storage.hasEncryptionKey();
+    document.getElementById('btnExportBackup').disabled = !hasKey;
+    document.getElementById('btnImportBackup').disabled = !hasKey;
+
     await loadFromStorage();
     await loadBudgets();
     await loadRecurring();
@@ -2130,6 +2145,10 @@ async function init() {
             e.target.value = '';
         }
     });
+
+    // Backup export/import
+    document.getElementById('btnExportBackup').addEventListener('click', () => window.fpCloudSync.downloadPackage());
+    document.getElementById('btnImportBackup').addEventListener('click', () => window.fpCloudSync.uploadPackage());
 
     // PWA Install Prompt
     let deferredPrompt = null;
