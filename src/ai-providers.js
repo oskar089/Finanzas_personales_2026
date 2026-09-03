@@ -71,7 +71,7 @@ async function getActiveProvider() {
 // --- Adapter: OpenAI-compatible (local + openai) -----------------------
 
 async function openaiCompatibleFetch(settings, messages, opts = {}) {
-    const { temperature = 0.3, max_tokens = 500 } = opts;
+    const { temperature = 0.3, max_tokens = 500, signal } = opts;
     const url = `${settings.baseUrl}/v1/chat/completions`;
     const headers = { 'Content-Type': 'application/json' };
     if (settings.apiKey) {
@@ -89,7 +89,8 @@ async function openaiCompatibleFetch(settings, messages, opts = {}) {
     const res = await fetch(url, {
         method: 'POST',
         headers,
-        body: JSON.stringify(body)
+        body: JSON.stringify(body),
+        ...(signal ? { signal } : {})
     });
 
     if (!res.ok) {
@@ -121,7 +122,7 @@ function geminiTranslateMessages(messages) {
 }
 
 async function geminiFetch(settings, messages, opts = {}) {
-    const { temperature = 0.3, max_tokens = 500 } = opts;
+    const { temperature = 0.3, max_tokens = 500, signal } = opts;
     const { contents, systemInstruction } = geminiTranslateMessages(messages);
 
     const url = `${settings.baseUrl}/v1beta/models/${settings.model}:generateContent?key=${settings.apiKey}`;
@@ -141,7 +142,8 @@ async function geminiFetch(settings, messages, opts = {}) {
     const res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
+        body: JSON.stringify(body),
+        ...(signal ? { signal } : {})
     });
 
     if (!res.ok) {
@@ -156,7 +158,7 @@ async function geminiFetch(settings, messages, opts = {}) {
 // --- Adapter: Claude ---------------------------------------------------
 
 async function claudeFetch(settings, messages, opts = {}) {
-    const { temperature = 0.3, max_tokens = 500 } = opts;
+    const { temperature = 0.3, max_tokens = 500, signal } = opts;
 
     let systemPrompt = null;
     const claudeMessages = [];
@@ -189,7 +191,8 @@ async function claudeFetch(settings, messages, opts = {}) {
     const res = await fetch(`${settings.baseUrl}/v1/messages`, {
         method: 'POST',
         headers,
-        body: JSON.stringify(body)
+        body: JSON.stringify(body),
+        ...(signal ? { signal } : {})
     });
 
     if (!res.ok) {

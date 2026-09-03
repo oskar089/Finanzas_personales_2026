@@ -202,7 +202,8 @@ function validateEntry({ tipo, amount, category, description } = {}) {
     if (!tipo || (tipo !== 'expense' && tipo !== 'income' && tipo !== 'savings')) {
         errors.push('Seleccioná un tipo válido.');
     }
-    if (amount === undefined || amount === null || amount === '' || parseAmount(amount) <= 0) {
+    const parsed = parseAmount(amount);
+    if (amount === undefined || amount === null || amount === '' || !isFinite(parsed) || parsed <= 0) {
         errors.push('El monto tiene que ser mayor a 0.');
     }
     if (!category || !category.trim()) {
@@ -362,6 +363,9 @@ function generateRecurringEntries(recurring, entries, month) {
     recurring.forEach(r => {
         if (!r.activo) return;
         if (r.diaMes < 1 || r.diaMes > 28) return; // solo 1-28 para evitar problemas fin de mes
+
+        // En el mes actual, no generar si el día del mes aún no llegó
+        if (isCurrentMonth && r.diaMes > today) return;
 
         // Verificar fecha inicio
         const [startYear, startMon] = r.fechaInicio.split('-').map(Number);

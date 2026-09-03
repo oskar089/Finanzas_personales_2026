@@ -7,16 +7,21 @@
 
 const CACHE_NAME = 'finanzas-v5';
 const ASSETS = [
-    '/',
-    '/index.html',
-    '/styles.css',
-    '/app.js',
-    '/src/finance.js',
-    '/src/crypto.js',
-    '/src/boot.js',
-    '/src/storage.js',
-    '/vendor/xlsx.full.min.js',
+    'index.html',
+    'styles.css',
+    'app.js',
+    'manifest.json',
+    'icons/icon-192x192.svg',
+    'icons/icon-512x512.svg',
+    'src/finance.js',
+    'src/crypto.js',
+    'src/storage.js',
+    'src/toast.js',
+    'src/ai-providers.js',
+    'src/boot.js',
+    'vendor/xlsx.full.min.js',
     'https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css',
+    'https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js',
     'https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js'
 ];
 

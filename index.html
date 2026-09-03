@@ -98,6 +98,9 @@
                         <button type="button" id="btnExportCSV" class="btn btn-outline-secondary">📊 Exportar Excel</button>
                         <input type="file" id="fileInputXLSX" accept=".xlsx,.xls" class="d-none">
                         <button type="button" id="btnImportXLSX" class="btn btn-outline-secondary ms-1">📤 Importar Excel</button>
+                        <input type="file" id="fileInputFPKG" accept=".fpkg" class="d-none">
+                        <button type="button" id="btnExportBackup" class="btn btn-outline-secondary ms-1">📦 Exportar Backup</button>
+                        <button type="button" id="btnImportBackup" class="btn btn-outline-secondary ms-1">📥 Importar Backup</button>
                         <button type="button" id="btnManageCategories" class="btn btn-outline-secondary ms-1" data-bs-toggle="modal" data-bs-target="#categoriesModal">🏷️ Categorías</button>
                     </div>
                 </form>
@@ -594,18 +597,43 @@
         </div>
     </div>
 
+    <!-- Modal Confirmar Importación -->
+    <div class="modal fade" id="importConfirmModal" tabindex="-1" aria-labelledby="importConfirmModalLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="importConfirmModalLabel">📥 Confirmar importación</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <p>Se importará un backup con los siguientes datos:</p>
+                    <ul id="importBundleInfo"></ul>
+                    <div class="alert alert-warning small">
+                        ⚠️ Esto reemplazará los datos actuales en los stores incluidos. Acción irreversible.
+                    </div>
+                    <div id="importError" class="text-danger small" role="alert"></div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="button" class="btn btn-danger" id="btnConfirmImport">Confirmar importación</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Bootstrap 5.3 JS bundle (popper included) -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js" integrity="sha384-C6RzsynM9kWDrMNeT87bh95OGNyZPhcTNXj1NW7RuBCsyN/o0jlpcV8Qyq46cDfL" crossorigin="anonymous"></script>
     <script src="src/finance.js"></script>
     <script src="src/crypto.js"></script>
     <script src="src/storage.js"></script>
+    <script src="src/cloud-sync.js"></script>
     <script src="src/toast.js"></script>
     <script src="src/ai-providers.js"></script>
     <script src="src/boot.js"></script>
     <script src="app.js"></script>
     <script>
         if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('/sw.js').then(reg => {
+            navigator.serviceWorker.register('./sw.js').then(reg => {
                 // Chequear actualizaciones cada vez que se carga la página
                 reg.update();
                 // Cuando haya un nuevo SW, recargar automáticamente

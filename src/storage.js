@@ -1109,13 +1109,153 @@ async function clearCurrencySettings() {
     localStorage.removeItem(LS_SETTINGS_KEY);
 }
 
+// --- Cloud sync: data-bundle-export / data-bundle-import -------------
+
+// Stores de datos exportados en el bundle (mismo orden que MIGRATION_PLAN).
+const DATA_STORES = [STORE_NAME, BUDGETS_STORE, RECURRING_STORE, CUSTOM_CATEGORIES_STORE, AI_SETTINGS_STORE, SETTINGS_STORE];
+const BUNDLE_VERSION = 1;
+
+// Regex de base64 estándar (con padding) usado para validar integridad del cryptoMeta.
+const BASE64_RE = /^[A-Za-z0-9+/]+={0,2}$/;
+
+// Exporta todas las stores de datos (envelopes crudos) + el cryptoMeta como un
+// bundle portable. Las stores vacías se serializan como null.
+async function exportAll() {
+    const db = await openDB();
+    try {
+        const stores = {};
+        for (const store of DATA_STORES) {
+            const rows = await rawGetAll(db, store);
+            stores[store] = (rows && rows.length > 0) ? rows : null;
+        }
+        const metaRows = await idbGetAllRaw(db, CRYPTO_META_STORE);
+        const cryptoMeta = metaRows.find(r => r.id === 'meta') || null;
+        return {
+            version: BUNDLE_VERSION,
+            dbVersion: DB_VERSION,
+            timestamp: new Date().toISOString(),
+            cryptoMeta,
+            stores,
+        };
+    } finally {
+        db.close();
+    }
+}
+
+// Escribe el envelope crudo en el espejo localStorage de los stores dual-write
+// (aiSettings/settings) y del cryptoMeta, manteniendo el patrón dual-write existente.
+function mirrorBundleToLS(store, records) {
+    if (store === AI_SETTINGS_STORE && typeof localStorage !== 'undefined') {
+        localStorage.setItem(LS_AI_SETTINGS_KEY, records.length ? JSON.stringify(records[0]) : '');
+    } else if (store === SETTINGS_STORE && typeof localStorage !== 'undefined') {
+        localStorage.setItem(LS_SETTINGS_KEY, records.length ? JSON.stringify(records[0]) : '');
+    }
+}
+
+// Valida un bundle .fpkg y lo escribe atómicamente en IDB. Nunca lanza: devuelve
+// { ok, errors }. Las stores no presentes en el bundle quedan intactas.
+async function importAll(bundle) {
+    const errors = [];
+
+    // 1. Objeto no-nulo
+    if (!bundle || typeof bundle !== 'object' || Array.isArray(bundle)) {
+        return { ok: false, errors: ['Invalid bundle: not an object'] };
+    }
+    // 2. Versión
+    if (!('version' in bundle)) {
+        return { ok: false, errors: ['Invalid bundle: missing version'] };
+    }
+    if (bundle.version !== BUNDLE_VERSION) {
+        return { ok: false, errors: [`Unsupported bundle version: ${bundle.version}`] };
+    }
+    // 3. Stores
+    if (!bundle.stores || typeof bundle.stores !== 'object' || Array.isArray(bundle.stores)) {
+        return { ok: false, errors: ['Invalid bundle: missing stores'] };
+    }
+    // 4. cryptoMeta presente
+    if (!bundle.cryptoMeta || typeof bundle.cryptoMeta !== 'object' || Array.isArray(bundle.cryptoMeta)) {
+        return { ok: false, errors: ['Invalid bundle: missing cryptoMeta'] };
+    }
+
+    // 5. Validación por store: solo los presentes en el bundle se tocan.
+    const storesToWrite = {};
+    for (const store of DATA_STORES) {
+        if (!(store in bundle.stores)) continue; // store ausente => intacto
+        const data = bundle.stores[store];
+        if (data === null || data === undefined) {
+            storesToWrite[store] = []; // store vacío en bundle => se vacía
+            continue;
+        }
+        if (!Array.isArray(data)) {
+            errors.push(`${store}: invalid store data`);
+            continue;
+        }
+        const valid = data.length === 0 || data.every(r => isEnvelope(r));
+        if (!valid) {
+            errors.push(`${store}: invalid envelope format`);
+            continue;
+        }
+        storesToWrite[store] = data;
+    }
+
+    // 6. Validación del cryptoMeta (estructura + base64).
+    const meta = bundle.cryptoMeta;
+    if (typeof meta.salt !== 'string' || !BASE64_RE.test(meta.salt)
+        || typeof meta.wrappedDek !== 'string' || !BASE64_RE.test(meta.wrappedDek)) {
+        errors.push('cryptoMeta: invalid envelope format');
+    }
+
+    if (errors.length > 0) {
+        return { ok: false, errors };
+    }
+
+    // Escritura atómica: una sola transacción readwrite sobre las stores presentes
+    // + cryptoMeta. Si algo falla, IDB aborta toda la transacción (all-or-nothing).
+    const db = await openDB();
+    try {
+        const storeNames = [...Object.keys(storesToWrite), CRYPTO_META_STORE];
+        const tx = db.transaction(storeNames, 'readwrite');
+        for (const store of Object.keys(storesToWrite)) {
+            const objStore = tx.objectStore(store);
+            objStore.clear();
+            const records = storesToWrite[store];
+            for (const record of records) {
+                objStore.put(record);
+            }
+        }
+        const cryptoStore = tx.objectStore(CRYPTO_META_STORE);
+        cryptoStore.clear();
+        cryptoStore.put({ id: 'meta', ...meta });
+
+        await new Promise((resolve, reject) => {
+            tx.oncomplete = resolve;
+            tx.onerror = () => reject(tx.error || new Error('transaction error'));
+            tx.onabort = () => reject(tx.error || new Error('transaction aborted'));
+        });
+    } catch (err) {
+        return { ok: false, errors: [err && err.message ? err.message : String(err)] };
+    } finally {
+        db.close();
+    }
+
+    // Espejos localeStorage de los stores dual-write, tras commit exitoso.
+    for (const store of Object.keys(storesToWrite)) {
+        mirrorBundleToLS(store, storesToWrite[store]);
+    }
+    if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(LS_CRYPTO_META_KEY, JSON.stringify({ id: 'meta', ...meta }));
+    }
+
+    return { ok: true, errors: [] };
+}
+
 // --- Exports ---------------------------------------------------------
 
 // Soporte tanto para Node.js (vitest) como navegador
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { load, save, clear, loadBudgets, saveBudgets, loadRecurring, saveRecurring, loadCustomCategories, saveCustomCategories, loadAiSettings, saveAiSettings, loadCurrencySettings, saveCurrencySettings, clearCurrencySettings, isIDBAvailable, initKey, changePassphrase, hasEncryptionKey, migrateEncryption, migrateLsKeysWhenIdbDown, MigrationVerifyError, rawGetAll, rawPut, rawClear, MIGRATION_PLAN };
+    module.exports = { load, save, clear, loadBudgets, saveBudgets, loadRecurring, saveRecurring, loadCustomCategories, saveCustomCategories, loadAiSettings, saveAiSettings, loadCurrencySettings, saveCurrencySettings, clearCurrencySettings, isIDBAvailable, initKey, changePassphrase, hasEncryptionKey, migrateEncryption, migrateLsKeysWhenIdbDown, MigrationVerifyError, rawGetAll, rawPut, rawClear, exportAll, importAll, MIGRATION_PLAN };
 }
 
 if (typeof window !== 'undefined') {
-    window.storage = { load, save, clear, loadBudgets, saveBudgets, loadRecurring, saveRecurring, loadCustomCategories, saveCustomCategories, loadAiSettings, saveAiSettings, loadCurrencySettings, saveCurrencySettings, clearCurrencySettings, initKey, changePassphrase, hasEncryptionKey };
+    window.storage = { load, save, clear, loadBudgets, saveBudgets, loadRecurring, saveRecurring, loadCustomCategories, saveCustomCategories, loadAiSettings, saveAiSettings, loadCurrencySettings, saveCurrencySettings, clearCurrencySettings, initKey, changePassphrase, hasEncryptionKey, exportAll, importAll };
 }

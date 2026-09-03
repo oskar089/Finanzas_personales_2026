@@ -340,6 +340,15 @@ describe('validateEntry()', () => {
         expect(errors.length).toBeGreaterThanOrEqual(1);
         expect(errors[0]).toMatch(/monto/i);
     });
+
+    it('rechaza montos no finitos (Infinity, NaN)', () => {
+        expect(finance.validateEntry({ ...validEntry, amount: 'Infinity' })).toContain('El monto tiene que ser mayor a 0.');
+        expect(finance.validateEntry({ ...validEntry, amount: 'NaN' })).toContain('El monto tiene que ser mayor a 0.');
+    });
+
+    it('rechaza texto no numérico como monto', () => {
+        expect(finance.validateEntry({ ...validEntry, amount: 'abc' })).toContain('El monto tiene que ser mayor a 0.');
+    });
 });
 
 // -------------------------------------------------------------------
@@ -699,6 +708,26 @@ describe('generateRecurringEntries()', () => {
         ];
         const result = finance.generateRecurringEntries(recurring29, entries, currentMonth);
         expect(result).toHaveLength(0);
+    });
+
+    it('NO genera en el mes actual si diaMes es futuro (mayor que hoy)', () => {
+        // Si hoy es 28 (el último día permitido), no hay día futuro en 1-28 → skip
+        const futureDay = today < 28 ? today + 1 : null;
+        if (futureDay === null) return;
+        const recFuture = [
+            { id: 'rf', tipo: 'expense', monto: 40, categoria: 'Test', descripcion: 'Futuro', diaMes: futureDay, fechaInicio: '2026-01', activo: true }
+        ];
+        const result = finance.generateRecurringEntries(recFuture, [], currentMonth);
+        expect(result).toHaveLength(0);
+    });
+
+    it('genera en el mes actual si diaMes es hoy o pasado', () => {
+        const recToday = [
+            { id: 'rt', tipo: 'expense', monto: 25, categoria: 'Test', descripcion: 'Hoy', diaMes: today, fechaInicio: '2026-01', activo: true }
+        ];
+        const result = finance.generateRecurringEntries(recToday, [], currentMonth);
+        expect(result).toHaveLength(1);
+        expect(result[0].descripcion).toBe('Hoy');
     });
 });
 
