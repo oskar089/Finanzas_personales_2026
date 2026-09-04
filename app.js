@@ -2154,6 +2154,24 @@ async function init() {
         }
     });
 
+    // Secure backup handlers keep errors user-visible even if the orchestration
+    // module cannot initialize. Import itself locks the page before crypto state
+    // can change and only reloads from that non-interactive state.
+    document.getElementById('btnExportBackup').addEventListener('click', async () => {
+        try {
+            await window.fpCloudSync.downloadPackage();
+        } catch {
+            toast.showError('Could not create the backup file.');
+        }
+    });
+    document.getElementById('btnImportBackup').addEventListener('click', async () => {
+        try {
+            await window.fpCloudSync.uploadPackage();
+        } catch {
+            toast.showError('Could not read the backup file.');
+        }
+    });
+
     // PWA Install Prompt
     let deferredPrompt = null;
     const btnInstall = document.getElementById('btnInstallPWA');
