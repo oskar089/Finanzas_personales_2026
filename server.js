@@ -21,7 +21,8 @@ const server = http.createServer((req, res) => {
 
     // Sanitize: prevent path traversal
     const safePath = path.normalize(path.join(__dirname, filePath));
-    if (!safePath.startsWith(__dirname)) {
+    const relativePath = path.relative(__dirname, safePath);
+    if (relativePath === '..' || relativePath.startsWith(`..${path.sep}`) || path.isAbsolute(relativePath)) {
         res.writeHead(403, { 'Content-Type': 'text/plain' });
         res.end('Forbidden');
         return;

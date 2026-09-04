@@ -37,11 +37,15 @@ function errorToInlineMessage(err) {
     }
 }
 
+function shouldBlockOnStorageReadError(err) {
+    return !!err && err.name === 'EncryptedStorageReadError';
+}
+
 // --- Exports: window.FPBoot + module.exports ------------------------
 // Ojo: el binding debe ser único (const top-level compartido entre scripts
 // clásicos); crypto.js ya usa `publicApi` y redeclararlo rompería el parseo.
 
-const bootApi = { determineBootState, errorToInlineMessage };
+const bootApi = { determineBootState, errorToInlineMessage, shouldBlockOnStorageReadError };
 
 if (typeof module !== 'undefined' && module.exports) module.exports = bootApi;
 if (typeof window !== 'undefined') window.FPBoot = bootApi;

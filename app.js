@@ -30,10 +30,20 @@ let aiSettings = null;      // configuración activa de IA (cargada desde storag
 
 // --- Persistencia -------------------------------------------------
 
+function isEncryptedStorageReadError(err) {
+    return window.FPBoot.shouldBlockOnStorageReadError(err);
+}
+
+function blockEncryptedStorageRead(err) {
+    console.error('No se pudieron verificar los datos cifrados; la app quedó bloqueada.', err);
+    document.getElementById('encryptedStorageReadError').classList.remove('d-none');
+}
+
 async function loadFromStorage() {
     try {
         entries = await storage.load();
     } catch (err) {
+        if (isEncryptedStorageReadError(err)) throw err;
         console.error('No se pudo leer storage, arrancamos vacíos.', err);
         entries = [];
     }
@@ -60,6 +70,7 @@ async function loadCustomCategoriesFromStorage() {
             customCategories = await storage.loadCustomCategories();
         }
     } catch (err) {
+        if (isEncryptedStorageReadError(err)) throw err;
         console.error('No se pudieron leer las categorias personalizadas.', err);
         customCategories = [];
     }
@@ -77,6 +88,7 @@ async function loadAiSettingsFromStorage() {
     try {
         aiSettings = await storage.loadAiSettings();
     } catch (err) {
+        if (isEncryptedStorageReadError(err)) throw err;
         console.error('No se pudieron leer las configuraciones de IA.', err);
         aiSettings = null;
     }
@@ -100,8 +112,27 @@ async function loadCurrencySettingsFromStorage() {
         const s = await storage.loadCurrencySettings();
         setDisplayConfig(s ? { displayCurrency: s.displayCurrency, rate: s.rates?.[s.displayCurrency] } : null);
     } catch (err) {
+        if (isEncryptedStorageReadError(err)) throw err;
         console.error('No se pudieron leer las configuraciones de moneda.', err);
         setDisplayConfig(null); // EUR por defecto — byte-idéntico
+    }
+}
+
+async function loadApplicationState() {
+    try {
+        await loadFromStorage();
+        await loadBudgets();
+        await loadRecurring();
+        await loadCustomCategoriesFromStorage();
+        await loadAiSettingsFromStorage();
+        await loadCurrencySettingsFromStorage();
+        return true;
+    } catch (err) {
+        if (isEncryptedStorageReadError(err)) {
+            blockEncryptedStorageRead(err);
+            return false;
+        }
+        throw err;
     }
 }
 
@@ -1428,7 +1459,8 @@ let budgets = {}; // { categoria: monto }
 async function loadBudgets() {
     try {
         budgets = await storage.loadBudgets() || {};
-    } catch {
+    } catch (err) {
+        if (isEncryptedStorageReadError(err)) throw err;
         budgets = {};
     }
 }
@@ -1515,7 +1547,8 @@ let recurring = []; // array de { id, tipo, monto, categoria, descripcion, diaMe
 async function loadRecurring() {
     try {
         recurring = await storage.loadRecurring() || [];
-    } catch {
+    } catch (err) {
+        if (isEncryptedStorageReadError(err)) throw err;
         recurring = [];
     }
 }
@@ -1855,12 +1888,7 @@ async function init() {
         // datos, replicando la carga del boot inicial.
         if (!(await cryptoGate())) return;
 
-        await loadFromStorage();
-        await loadBudgets();
-        await loadRecurring();
-        await loadCustomCategoriesFromStorage();
-        await loadAiSettingsFromStorage();
-        await loadCurrencySettingsFromStorage();
+        if (!(await loadApplicationState())) return;
         render();
     });
 
@@ -1868,12 +1896,7 @@ async function init() {
     // (DE4). checkAndGenerateRecurring() corre después → solo post-clave.
     if (!(await cryptoGate())) return;
 
-    await loadFromStorage();
-    await loadBudgets();
-    await loadRecurring();
-    await loadCustomCategoriesFromStorage();
-    await loadAiSettingsFromStorage();
-    await loadCurrencySettingsFromStorage();
+    if (!(await loadApplicationState())) return;
     await checkAndGenerateRecurring();
 
     // Fecha de hoy por defecto

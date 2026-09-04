@@ -134,6 +134,23 @@ describe('encryptPayload() — envelope (DE2)', () => {
 
 // --- DE6: changePassphrase() re-envuelve el MISMO DEK, no re-cifra ---------
 describe('changePassphrase() — re-wrap (DE6)', () => {
+    it('rejects a wrong current passphrase without changing metadata or payload unlockability', async () => {
+        const mod = await freshModule();
+        const meta = await mod.init('contraseña-actual', null);
+        const metadataSnapshot = JSON.stringify(meta);
+        const payload = await mod.encryptPayload('entries', { monto: 111 });
+        const payloadSnapshot = JSON.stringify(payload);
+
+        await expect(mod.changePassphrase('contraseña-incorrecta', 'contraseña-nueva-9'))
+            .rejects.toMatchObject({ name: 'WrongPassphraseError' });
+        expect(JSON.stringify(meta)).toBe(metadataSnapshot);
+        expect(JSON.stringify(payload)).toBe(payloadSnapshot);
+
+        const reopened = await freshModule();
+        await reopened.init('contraseña-actual', meta);
+        await expect(reopened.decryptPayload('entries', payload)).resolves.toEqual({ monto: 111 });
+    });
+
     it('re-envuelve con salt nuevo, payloads byte-idénticos, descifrable con la nueva', async () => {
         const mod = await freshModule();
         const meta1 = await mod.init('contraseña-actual', null);

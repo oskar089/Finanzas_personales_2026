@@ -49,6 +49,22 @@ const sampleEntries = [
 
 const TEST_PASSPHRASE = 'contraseña-de-prueba-2026';
 
+function corruptCiphertext(envelope) {
+    const firstChar = envelope.ct[0] === 'A' ? 'B' : 'A';
+    return { ...envelope, ct: `${firstChar}${envelope.ct.slice(1)}` };
+}
+
+function abortWritesFor(storeName) {
+    const originalPut = IDBObjectStore.prototype.put;
+    return vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(function (record, key) {
+        if (this.name === storeName) {
+            this.transaction.abort();
+            throw new DOMException('Injected write failure', 'AbortError');
+        }
+        return originalPut.call(this, record, key);
+    });
+}
+
 // Limpiar entre tests (gate primero, luego clear: nunca borrar antes de resolver la clave)
 beforeEach(async () => {
     // initKey es idempotente: la primera llamada deriva y persiste el meta; las
@@ -81,6 +97,42 @@ describe('storage.load()', () => {
         const result = await storage.load();
         expect(result[0].tipo).toBe('expense');
     });
+
+    it('rechaza un envelope IDB corrupto y conserva el ciphertext sin reemplazarlo', async () => {
+        await storage.save(sampleEntries);
+        const db = await openRawDb();
+        const [envelope] = await idbGetAllRaw(db, 'entries');
+        const corrupted = corruptCiphertext(envelope);
+        await rawPut(db, 'entries', corrupted);
+        const persistedCiphertext = JSON.stringify(corrupted);
+
+        await expect(storage.load()).rejects.toBeInstanceOf(storage.EncryptedStorageReadError);
+
+        const [afterFailure] = await idbGetAllRaw(db, 'entries');
+        expect(JSON.stringify(afterFailure)).toBe(persistedCiphertext);
+    });
+
+    it('rechaza un envelope LS cifrado con otra clave y no lo reemplaza por un estado vacío', async () => {
+        const originalIndexedDB = globalThis.indexedDB;
+        globalThis.indexedDB = undefined;
+        try {
+            await storage.save(sampleEntries);
+            const persistedCiphertext = localStorage.getItem('finanzas:gastos:v1');
+
+            window.fpCrypto.reset();
+            await window.fpCrypto.init('otra-contraseña-de-prueba');
+            const setItemSpy = vi.spyOn(Storage.prototype, 'setItem');
+            try {
+                await expect(storage.load()).rejects.toBeInstanceOf(storage.EncryptedStorageReadError);
+                expect(localStorage.getItem('finanzas:gastos:v1')).toBe(persistedCiphertext);
+                expect(setItemSpy).not.toHaveBeenCalled();
+            } finally {
+                setItemSpy.mockRestore();
+            }
+        } finally {
+            globalThis.indexedDB = originalIndexedDB;
+        }
+    });
 });
 
 // -------------------------------------------------------------------
@@ -106,6 +158,79 @@ describe('storage.save()', () => {
         await storage.save([]);
         const result = await storage.load();
         expect(result).toHaveLength(0);
+    });
+
+    it('retains the prior encrypted envelope when an entries replacement write aborts', async () => {
+        await storage.save(sampleEntries);
+        const db = await openRawDb();
+        const [priorEnvelope] = await idbGetAllRaw(db, 'entries');
+        const putSpy = abortWritesFor('entries');
+
+        try {
+            await storage.save([{ ...sampleEntries[0], id: 'replacement-entry' }]);
+        } finally {
+            putSpy.mockRestore();
+        }
+
+        const [persistedEnvelope] = await idbGetAllRaw(db, 'entries');
+        expect(persistedEnvelope).toEqual(priorEnvelope);
+        await expect(storage.load()).resolves.toEqual(sampleEntries);
+    });
+});
+
+describe('storage.loadBudgets()', () => {
+    it('rechaza un envelope IDB corrupto en lugar de usar un presupuesto vacío de fallback', async () => {
+        await storage.saveBudgets({ Comida: 500 });
+        const db = await openRawDb();
+        const [envelope] = await idbGetAllRaw(db, 'budgets');
+        const corrupted = corruptCiphertext(envelope);
+        await rawPut(db, 'budgets', corrupted);
+        const persistedCiphertext = JSON.stringify(corrupted);
+
+        await expect(storage.loadBudgets()).rejects.toBeInstanceOf(storage.EncryptedStorageReadError);
+
+        const [afterFailure] = await idbGetAllRaw(db, 'budgets');
+        expect(JSON.stringify(afterFailure)).toBe(persistedCiphertext);
+    });
+});
+
+describe('storage.saveBudgets()', () => {
+    it('retains the prior encrypted envelope when a budgets replacement write aborts', async () => {
+        const priorBudgets = { Comida: 500 };
+        await storage.saveBudgets(priorBudgets);
+        const db = await openRawDb();
+        const [priorEnvelope] = await idbGetAllRaw(db, 'budgets');
+        const putSpy = abortWritesFor('budgets');
+
+        try {
+            await storage.saveBudgets({ Transporte: 300 });
+        } finally {
+            putSpy.mockRestore();
+        }
+
+        const [persistedEnvelope] = await idbGetAllRaw(db, 'budgets');
+        expect(persistedEnvelope).toEqual(priorEnvelope);
+        await expect(storage.loadBudgets()).resolves.toEqual(priorBudgets);
+    });
+});
+
+describe('storage.saveRecurring()', () => {
+    it('retains the prior encrypted envelope when a recurring replacement write aborts', async () => {
+        const priorRecurring = [{ id: 'monthly-rent', nombre: 'Rent', monto: 900, frecuencia: 'monthly' }];
+        await storage.saveRecurring(priorRecurring);
+        const db = await openRawDb();
+        const [priorEnvelope] = await idbGetAllRaw(db, 'recurring');
+        const putSpy = abortWritesFor('recurring');
+
+        try {
+            await storage.saveRecurring([{ id: 'music-plan', nombre: 'Music', monto: 10, frecuencia: 'monthly' }]);
+        } finally {
+            putSpy.mockRestore();
+        }
+
+        const [persistedEnvelope] = await idbGetAllRaw(db, 'recurring');
+        expect(persistedEnvelope).toEqual(priorEnvelope);
+        await expect(storage.loadRecurring()).resolves.toEqual(priorRecurring);
     });
 });
 
@@ -204,6 +329,26 @@ describe('storage.saveCustomCategories() / loadCustomCategories()', () => {
         } finally {
             globalThis.indexedDB = original;
         }
+    });
+});
+
+describe('storage.saveCustomCategories()', () => {
+    it('retains the prior encrypted envelope when a categories replacement write aborts', async () => {
+        const priorCategories = [sampleCustomCategories[0]];
+        await storage.saveCustomCategories(priorCategories);
+        const db = await openRawDb();
+        const [priorEnvelope] = await idbGetAllRaw(db, 'customCategories');
+        const putSpy = abortWritesFor('customCategories');
+
+        try {
+            await storage.saveCustomCategories([sampleCustomCategories[1]]);
+        } finally {
+            putSpy.mockRestore();
+        }
+
+        const [persistedEnvelope] = await idbGetAllRaw(db, 'customCategories');
+        expect(persistedEnvelope).toEqual(priorEnvelope);
+        await expect(storage.loadCustomCategories()).resolves.toEqual(priorCategories);
     });
 });
 

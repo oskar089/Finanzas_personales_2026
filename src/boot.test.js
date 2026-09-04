@@ -6,7 +6,7 @@
 // =====================================================================
 
 // La colección de import falla hasta que src/boot.js exista (RED garantizado).
-import { determineBootState, errorToInlineMessage } from './boot.js';
+import { determineBootState, errorToInlineMessage, shouldBlockOnStorageReadError } from './boot.js';
 
 // -------------------------------------------------------------------
 // determineBootState({ hasKey, isReady, secureContext })
@@ -79,5 +79,15 @@ describe('errorToInlineMessage()', () => {
         expect(msg).toMatch(/No se pudo inicializar el cifrado/i);
         expect(msg).not.toContain('DERIVE_FAIL_0x7F');
         expect(msg).not.toContain(err.message);
+    });
+});
+
+describe('shouldBlockOnStorageReadError()', () => {
+    it('bloquea el boot cuando storage rechaza un envelope cifrado', () => {
+        expect(shouldBlockOnStorageReadError({ name: 'EncryptedStorageReadError' })).toBe(true);
+    });
+
+    it('no bloquea por errores ajenos a la lectura cifrada', () => {
+        expect(shouldBlockOnStorageReadError(new Error('IndexedDB unavailable'))).toBe(false);
     });
 });

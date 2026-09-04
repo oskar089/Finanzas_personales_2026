@@ -15,7 +15,7 @@ const DEK_BYTES = 32;
 const KDF_DKLEN = 44; // 32 bytes KEK + 12 bytes IV de wrap determinista
 const B64_CHUNK = 0xFFFF; // chunks ~64 KB (límite de btoa/apply)
 
-let state = { ready: false, dek: null, salt: null, iterations: PBKDF2_ITERATIONS };
+let state = { ready: false, dek: null, salt: null, iterations: PBKDF2_ITERATIONS, meta: null };
 
 // --- Errores de dominio ----------------------------------------------------
 
@@ -123,7 +123,8 @@ async function init(passphrase, meta) {
         state.salt = globalThis.crypto.getRandomValues(new Uint8Array(SALT_BYTES));
         state.dek = await globalThis.crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt']);
         state.ready = true;
-        return buildMeta(passphrase);
+        state.meta = await buildMeta(passphrase);
+        return state.meta;
     }
 
     // Desbloqueo: la KEK desenvuelve el DEK guardado (GCM autenticado).
@@ -139,6 +140,7 @@ async function init(passphrase, meta) {
     state.salt = fromB64(meta.salt);
     state.iterations = meta.iterations || PBKDF2_ITERATIONS;
     state.ready = true;
+    state.meta = meta;
     return meta;
 }
 
@@ -149,12 +151,12 @@ async function changePassphrase(current, next) {
     if (!state.ready) throw new EncryptionNotReadyError();
 
     // Re-autenticar con la contraseña actual (el wrap GCM solo acepta la KEK correcta).
-    const currentMeta = { salt: toB64(state.salt), wrappedDek: await wrapDek(current), iterations: state.iterations };
-    await init(current, currentMeta); // WrongPassphraseError si current no coincide (DE5)
+    await init(current, state.meta); // WrongPassphraseError si current no coincide (DE5)
 
     // Re-envolver el mismo DEK con salt fresco + la nueva contraseña (DE6).
     state.salt = globalThis.crypto.getRandomValues(new Uint8Array(SALT_BYTES));
-    return buildMeta(next); // el caller persiste { salt, wrappedDek, iterations }
+    state.meta = await buildMeta(next);
+    return state.meta; // el caller persiste { salt, wrappedDek, iterations }
 }
 
 // --- Envelope de payload: AES-GCM-256, IV 12B aleatorio, AAD = store -------
@@ -194,7 +196,7 @@ function isEncryptionReady() {
 // Descarta el DEK/KEK en memoria (p. ej. bloquear sesión). No afecta los datos
 // persistidos: solo revierte la clave activa al estado "sin desbloquear".
 function reset() {
-    state = { ready: false, dek: null, salt: null, iterations: PBKDF2_ITERATIONS };
+    state = { ready: false, dek: null, salt: null, iterations: PBKDF2_ITERATIONS, meta: null };
 }
 
 // --- Exports: window.fpCrypto (NUNCA window.crypto) + module.exports --------

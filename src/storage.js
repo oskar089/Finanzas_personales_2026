@@ -37,6 +37,26 @@ function isEnvelope(v) {
         && typeof v.iv === 'string' && typeof v.ct === 'string';
 }
 
+class EncryptedStorageReadError extends Error {
+    constructor(store) {
+        super('No se pudieron verificar los datos cifrados.');
+        this.name = 'EncryptedStorageReadError';
+        this.store = store;
+    }
+}
+
+async function decryptEncryptedPayload(store, envelope) {
+    try {
+        return await fpCrypto.decryptPayload(store, envelope);
+    } catch {
+        throw new EncryptedStorageReadError(store);
+    }
+}
+
+function isObjectRecord(value) {
+    return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
 function assertKeyReady() {
     if (!fpCrypto || !fpCrypto.isEncryptionReady()) {
         throw new Error('Cifrado no inicializado: llamá storage.initKey(passphrase) primero.');
@@ -136,7 +156,9 @@ function idbGetAll(db) {
             if (rows.length === 1 && isEnvelope(rows[0])) {
                 // Envelope de almacén: descifrar payload completo (DE11)
                 try {
-                    resolve(await fpCrypto.decryptPayload(STORE_NAME, rows[0]));
+                    const payload = await decryptEncryptedPayload(STORE_NAME, rows[0]);
+                    if (!Array.isArray(payload)) throw new EncryptedStorageReadError(STORE_NAME);
+                    resolve(payload);
                 } catch (err) {
                     reject(err);
                 }
@@ -148,12 +170,6 @@ function idbGetAll(db) {
     });
 }
 
-async function idbPutAll(db, payload) {
-    assertKeyReady();
-    const env = await fpCrypto.encryptPayload(STORE_NAME, payload);
-    await idbPutRaw(db, STORE_NAME, envelopeRecord(STORE_NAME, env));
-}
-
 function idbClear(db) {
     return new Promise((resolve, reject) => {
         const tx = db.transaction(STORE_NAME, 'readwrite');
@@ -161,6 +177,29 @@ function idbClear(db) {
         const request = store.clear();
         request.onsuccess = () => resolve();
         request.onerror = () => reject(request.error);
+    });
+}
+
+async function idbReplaceAll(db, storeName, payload) {
+    const record = payload.length > 0 ? await encryptAndRecord(storeName, payload) : null;
+    await idbReplaceAllRaw(db, storeName, record);
+}
+
+function idbReplaceAllRaw(db, storeName, record) {
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(storeName, 'readwrite');
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+        tx.onabort = () => reject(tx.error || new DOMException('IndexedDB replacement aborted', 'AbortError'));
+
+        try {
+            const store = tx.objectStore(storeName);
+            store.clear();
+            if (record) store.put(record);
+        } catch (err) {
+            try { tx.abort(); } catch { /* Transaction already aborted. */ }
+            reject(err);
+        }
     });
 }
 
@@ -175,7 +214,9 @@ function idbGetAllBudgets(db) {
             const rows = request.result;
             if (rows.length === 1 && isEnvelope(rows[0])) {
                 try {
-                    resolve(await fpCrypto.decryptPayload(BUDGETS_STORE, rows[0]));
+                    const payload = await decryptEncryptedPayload(BUDGETS_STORE, rows[0]);
+                    if (!Array.isArray(payload)) throw new EncryptedStorageReadError(BUDGETS_STORE);
+                    resolve(payload);
                 } catch (err) {
                     reject(err);
                 }
@@ -183,22 +224,6 @@ function idbGetAllBudgets(db) {
             }
             resolve(rows);
         };
-        request.onerror = () => reject(request.error);
-    });
-}
-
-async function idbPutAllBudgets(db, payload) {
-    assertKeyReady();
-    const env = await fpCrypto.encryptPayload(BUDGETS_STORE, payload);
-    await idbPutRaw(db, BUDGETS_STORE, envelopeRecord(BUDGETS_STORE, env));
-}
-
-function idbClearBudgets(db) {
-    return new Promise((resolve, reject) => {
-        const tx = db.transaction(BUDGETS_STORE, 'readwrite');
-        const store = tx.objectStore(BUDGETS_STORE);
-        const request = store.clear();
-        request.onsuccess = () => resolve();
         request.onerror = () => reject(request.error);
     });
 }
@@ -214,7 +239,9 @@ function idbGetAllRecurring(db) {
             const rows = request.result;
             if (rows.length === 1 && isEnvelope(rows[0])) {
                 try {
-                    resolve(await fpCrypto.decryptPayload(RECURRING_STORE, rows[0]));
+                    const payload = await decryptEncryptedPayload(RECURRING_STORE, rows[0]);
+                    if (!Array.isArray(payload)) throw new EncryptedStorageReadError(RECURRING_STORE);
+                    resolve(payload);
                 } catch (err) {
                     reject(err);
                 }
@@ -222,22 +249,6 @@ function idbGetAllRecurring(db) {
             }
             resolve(rows);
         };
-        request.onerror = () => reject(request.error);
-    });
-}
-
-async function idbPutAllRecurring(db, payload) {
-    assertKeyReady();
-    const env = await fpCrypto.encryptPayload(RECURRING_STORE, payload);
-    await idbPutRaw(db, RECURRING_STORE, envelopeRecord(RECURRING_STORE, env));
-}
-
-function idbClearRecurring(db) {
-    return new Promise((resolve, reject) => {
-        const tx = db.transaction(RECURRING_STORE, 'readwrite');
-        const store = tx.objectStore(RECURRING_STORE);
-        const request = store.clear();
-        request.onsuccess = () => resolve();
         request.onerror = () => reject(request.error);
     });
 }
@@ -253,7 +264,9 @@ function idbGetAllCustomCategories(db) {
             const rows = request.result;
             if (rows.length === 1 && isEnvelope(rows[0])) {
                 try {
-                    resolve(await fpCrypto.decryptPayload(CUSTOM_CATEGORIES_STORE, rows[0]));
+                    const payload = await decryptEncryptedPayload(CUSTOM_CATEGORIES_STORE, rows[0]);
+                    if (!Array.isArray(payload)) throw new EncryptedStorageReadError(CUSTOM_CATEGORIES_STORE);
+                    resolve(payload);
                 } catch (err) {
                     reject(err);
                 }
@@ -265,28 +278,14 @@ function idbGetAllCustomCategories(db) {
     });
 }
 
-async function idbPutAllCustomCategories(db, payload) {
-    assertKeyReady();
-    const env = await fpCrypto.encryptPayload(CUSTOM_CATEGORIES_STORE, payload);
-    await idbPutRaw(db, CUSTOM_CATEGORIES_STORE, envelopeRecord(CUSTOM_CATEGORIES_STORE, env));
-}
-
-function idbClearCustomCategories(db) {
-    return new Promise((resolve, reject) => {
-        const tx = db.transaction(CUSTOM_CATEGORIES_STORE, 'readwrite');
-        const store = tx.objectStore(CUSTOM_CATEGORIES_STORE);
-        const request = store.clear();
-        request.onsuccess = () => resolve();
-        request.onerror = () => reject(request.error);
-    });
-}
-
 // --- AI Settings helpers -----------------------------------------------
 
 async function idbGetAiSettings(db) {
     const rec = await idbGetRaw(db, AI_SETTINGS_STORE, 'active');
     if (rec && isEnvelope(rec)) {
-        return fpCrypto.decryptPayload(AI_SETTINGS_STORE, rec);
+        const payload = await decryptEncryptedPayload(AI_SETTINGS_STORE, rec);
+        if (!isObjectRecord(payload)) throw new EncryptedStorageReadError(AI_SETTINGS_STORE);
+        return payload;
     }
     return rec || null; // legacy plaintext (pre-v7) o ausente
 }
@@ -302,7 +301,9 @@ async function idbPutAiSettings(db, settings) {
 async function idbGetSettings(db) {
     const rec = await idbGetRaw(db, SETTINGS_STORE, 'active');
     if (rec && isEnvelope(rec)) {
-        return fpCrypto.decryptPayload(SETTINGS_STORE, rec);
+        const payload = await decryptEncryptedPayload(SETTINGS_STORE, rec);
+        if (!isObjectRecord(payload)) throw new EncryptedStorageReadError(SETTINGS_STORE);
+        return payload;
     }
     return rec || null; // legacy plaintext (pre-v7) o ausente
 }
@@ -318,16 +319,18 @@ async function idbPutSettings(db, settings) {
 async function lsLoad() {
     const raw = localStorage.getItem(LS_KEY);
     if (!raw) return [];
+    let parsed;
     try {
-        const parsed = JSON.parse(raw);
-        if (isEnvelope(parsed)) {
-            const plain = await fpCrypto.decryptPayload(STORE_NAME, parsed);
-            return Array.isArray(plain) ? plain : [];
-        }
-        return Array.isArray(parsed) ? parsed : [];
+        parsed = JSON.parse(raw);
     } catch {
         return [];
     }
+    if (isEnvelope(parsed)) {
+        const plain = await decryptEncryptedPayload(STORE_NAME, parsed);
+        if (!Array.isArray(plain)) throw new EncryptedStorageReadError(STORE_NAME);
+        return plain;
+    }
+    return Array.isArray(parsed) ? parsed : [];
 }
 
 async function lsSave(entries) {
@@ -343,16 +346,18 @@ function lsClear() {
 async function lsLoadBudgets() {
     const raw = localStorage.getItem(LS_BUDGETS_KEY);
     if (!raw) return {};
+    let parsed;
     try {
-        const parsed = JSON.parse(raw);
-        if (isEnvelope(parsed)) {
-            const plain = await fpCrypto.decryptPayload(BUDGETS_STORE, parsed);
-            return plain && typeof plain === 'object' ? plain : {};
-        }
-        return parsed && typeof parsed === 'object' ? parsed : {};
+        parsed = JSON.parse(raw);
     } catch {
         return {};
     }
+    if (isEnvelope(parsed)) {
+        const plain = await decryptEncryptedPayload(BUDGETS_STORE, parsed);
+        if (!isObjectRecord(plain)) throw new EncryptedStorageReadError(BUDGETS_STORE);
+        return plain;
+    }
+    return isObjectRecord(parsed) ? parsed : {};
 }
 
 async function lsSaveBudgets(budgets) {
@@ -364,16 +369,18 @@ async function lsSaveBudgets(budgets) {
 async function lsLoadRecurring() {
     const raw = localStorage.getItem(LS_RECURRING_KEY);
     if (!raw) return [];
+    let parsed;
     try {
-        const parsed = JSON.parse(raw);
-        if (isEnvelope(parsed)) {
-            const plain = await fpCrypto.decryptPayload(RECURRING_STORE, parsed);
-            return Array.isArray(plain) ? plain : [];
-        }
-        return Array.isArray(parsed) ? parsed : [];
+        parsed = JSON.parse(raw);
     } catch {
         return [];
     }
+    if (isEnvelope(parsed)) {
+        const plain = await decryptEncryptedPayload(RECURRING_STORE, parsed);
+        if (!Array.isArray(plain)) throw new EncryptedStorageReadError(RECURRING_STORE);
+        return plain;
+    }
+    return Array.isArray(parsed) ? parsed : [];
 }
 
 async function lsSaveRecurring(recurring) {
@@ -385,16 +392,18 @@ async function lsSaveRecurring(recurring) {
 async function lsLoadCustomCategories() {
     const raw = localStorage.getItem(LS_CUSTOM_CATEGORIES_KEY);
     if (!raw) return [];
+    let parsed;
     try {
-        const parsed = JSON.parse(raw);
-        if (isEnvelope(parsed)) {
-            const plain = await fpCrypto.decryptPayload(CUSTOM_CATEGORIES_STORE, parsed);
-            return Array.isArray(plain) ? plain : [];
-        }
-        return Array.isArray(parsed) ? parsed : [];
+        parsed = JSON.parse(raw);
     } catch {
         return [];
     }
+    if (isEnvelope(parsed)) {
+        const plain = await decryptEncryptedPayload(CUSTOM_CATEGORIES_STORE, parsed);
+        if (!Array.isArray(plain)) throw new EncryptedStorageReadError(CUSTOM_CATEGORIES_STORE);
+        return plain;
+    }
+    return Array.isArray(parsed) ? parsed : [];
 }
 
 async function lsSaveCustomCategories(categories) {
@@ -406,15 +415,18 @@ async function lsSaveCustomCategories(categories) {
 async function lsLoadAiSettings() {
     const raw = localStorage.getItem(LS_AI_SETTINGS_KEY);
     if (!raw) return null;
+    let parsed;
     try {
-        const parsed = JSON.parse(raw);
-        if (isEnvelope(parsed)) {
-            return fpCrypto.decryptPayload(AI_SETTINGS_STORE, parsed);
-        }
-        return parsed && typeof parsed === 'object' ? parsed : null;
+        parsed = JSON.parse(raw);
     } catch {
         return null;
     }
+    if (isEnvelope(parsed)) {
+        const plain = await decryptEncryptedPayload(AI_SETTINGS_STORE, parsed);
+        if (!isObjectRecord(plain)) throw new EncryptedStorageReadError(AI_SETTINGS_STORE);
+        return plain;
+    }
+    return isObjectRecord(parsed) ? parsed : null;
 }
 
 async function lsSaveAiSettings(settings) {
@@ -426,15 +438,18 @@ async function lsSaveAiSettings(settings) {
 async function lsLoadSettings() {
     const raw = localStorage.getItem(LS_SETTINGS_KEY);
     if (!raw) return null;
+    let parsed;
     try {
-        const parsed = JSON.parse(raw);
-        if (isEnvelope(parsed)) {
-            return fpCrypto.decryptPayload(SETTINGS_STORE, parsed);
-        }
-        return parsed && typeof parsed === 'object' ? parsed : null;
+        parsed = JSON.parse(raw);
     } catch {
         return null;
     }
+    if (isEnvelope(parsed)) {
+        const plain = await decryptEncryptedPayload(SETTINGS_STORE, parsed);
+        if (!isObjectRecord(plain)) throw new EncryptedStorageReadError(SETTINGS_STORE);
+        return plain;
+    }
+    return isObjectRecord(parsed) ? parsed : null;
 }
 
 async function lsSaveSettings(settings) {
@@ -789,10 +804,7 @@ async function save(entries) {
     try {
         const db = await openDB();
         try {
-            await idbClear(db);
-            if (entries.length > 0) {
-                await idbPutAll(db, entries);
-            }
+            await idbReplaceAll(db, STORE_NAME, entries);
         } finally {
             db.close();
         }
@@ -838,7 +850,8 @@ async function loadBudgets() {
         } finally {
             db.close();
         }
-    } catch {
+    } catch (err) {
+        if (err instanceof EncryptedStorageReadError) throw err;
         return lsLoadBudgets();
     }
 }
@@ -854,10 +867,7 @@ async function saveBudgets(budgets) {
         try {
             // Convertir objeto {categoria: monto} a array de {categoria, monto}
             const arr = Object.entries(budgets).map(([categoria, monto]) => ({ categoria, monto }));
-            await idbClearBudgets(db);
-            if (arr.length > 0) {
-                await idbPutAllBudgets(db, arr);
-            }
+            await idbReplaceAll(db, BUDGETS_STORE, arr);
         } finally {
             db.close();
         }
@@ -881,7 +891,8 @@ async function loadRecurring() {
         } finally {
             db.close();
         }
-    } catch {
+    } catch (err) {
+        if (err instanceof EncryptedStorageReadError) throw err;
         return lsLoadRecurring();
     }
 }
@@ -895,10 +906,7 @@ async function saveRecurring(recurring) {
     try {
         const db = await openDB();
         try {
-            await idbClearRecurring(db);
-            if (recurring.length > 0) {
-                await idbPutAllRecurring(db, recurring);
-            }
+            await idbReplaceAll(db, RECURRING_STORE, recurring);
         } finally {
             db.close();
         }
@@ -921,7 +929,8 @@ async function loadCustomCategories() {
         } finally {
             db.close();
         }
-    } catch {
+    } catch (err) {
+        if (err instanceof EncryptedStorageReadError) throw err;
         return lsLoadCustomCategories();
     }
 }
@@ -935,10 +944,7 @@ async function saveCustomCategories(categories) {
     try {
         const db = await openDB();
         try {
-            await idbClearCustomCategories(db);
-            if (categories.length > 0) {
-                await idbPutAllCustomCategories(db, categories);
-            }
+            await idbReplaceAll(db, CUSTOM_CATEGORIES_STORE, categories);
         } finally {
             db.close();
         }
@@ -961,7 +967,8 @@ async function loadAiSettings() {
         } finally {
             db.close();
         }
-    } catch {
+    } catch (err) {
+        if (err instanceof EncryptedStorageReadError) throw err;
         return lsLoadAiSettings();
     }
 }
@@ -1030,7 +1037,8 @@ async function loadCurrencySettings() {
         } finally {
             db.close();
         }
-    } catch {
+    } catch (err) {
+        if (err instanceof EncryptedStorageReadError) throw err;
         return lsLoadSettings();
     }
 }
@@ -1113,7 +1121,7 @@ async function clearCurrencySettings() {
 
 // Soporte tanto para Node.js (vitest) como navegador
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { load, save, clear, loadBudgets, saveBudgets, loadRecurring, saveRecurring, loadCustomCategories, saveCustomCategories, loadAiSettings, saveAiSettings, loadCurrencySettings, saveCurrencySettings, clearCurrencySettings, isIDBAvailable, initKey, changePassphrase, hasEncryptionKey, migrateEncryption, migrateLsKeysWhenIdbDown, MigrationVerifyError, rawGetAll, rawPut, rawClear, MIGRATION_PLAN };
+    module.exports = { load, save, clear, loadBudgets, saveBudgets, loadRecurring, saveRecurring, loadCustomCategories, saveCustomCategories, loadAiSettings, saveAiSettings, loadCurrencySettings, saveCurrencySettings, clearCurrencySettings, isIDBAvailable, initKey, changePassphrase, hasEncryptionKey, migrateEncryption, migrateLsKeysWhenIdbDown, MigrationVerifyError, EncryptedStorageReadError, rawGetAll, rawPut, rawClear, MIGRATION_PLAN };
 }
 
 if (typeof window !== 'undefined') {
