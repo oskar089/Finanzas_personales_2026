@@ -1,0 +1,33 @@
+name: Security and Data Integrity Report
+description: Report a security concern or data-integrity problem.
+title: "[Security/Integrity]: "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: Describe the security concern or data-integrity problem.
+    validations:
+      required: true
+  - type: textarea
+    id: impact
+    attributes:
+      label: Security or Data Integrity Impact
+      description: Explain the affected data, users, or security properties.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Reproduction Steps or Evidence
+      description: Provide steps, logs, screenshots, or other supporting evidence.
+    validations:
+      required: true
+  - type: textarea
+    id: resolution
+    attributes:
+      label: Proposed Resolution
+      description: Describe a suggested fix or mitigation.
+    validations:
+      required: true
