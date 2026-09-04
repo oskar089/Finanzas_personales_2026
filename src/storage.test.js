@@ -1020,3 +1020,148 @@ describe('storage: migrateLsKeysWhenIdbDown implementado', () => {
         expect(localStorage.getItem('finanzas:gastos:v1')).toContain('AES-GCM-256');
     });
 });
+
+// -------------------------------------------------------------------
+// Secure complete backup packages
+// -------------------------------------------------------------------
+const BACKUP_STORES = ['entries', 'budgets', 'recurring', 'customCategories', 'aiSettings', 'settings'];
+
+function cloneBundle(bundle) {
+    return JSON.parse(JSON.stringify(bundle));
+}
+
+async function seedCompleteBackupState(marker) {
+    window.fpCrypto.reset();
+    await storage.initKey(TEST_PASSPHRASE);
+    await storage.save([{ ...sampleEntries[0], id: `entry-${marker}`, descripcion: marker }]);
+    await storage.saveBudgets({ [`Budget-${marker}`]: marker.length });
+    await storage.saveRecurring([{ id: `recurring-${marker}`, nombre: marker, monto: marker.length, frecuencia: 'monthly' }]);
+    await storage.saveCustomCategories([{ nombre: `Category-${marker}`, tipo: 'expense' }]);
+    await storage.saveAiSettings({ provider: marker, apiKey: `key-${marker}`, model: 'test' });
+    await storage.saveCurrencySettings({ baseCurrency: 'USD', displayCurrency: marker, rates: { USD: 1 } });
+}
+
+async function rawBackupSnapshot() {
+    const db = await openRawDb();
+    const idb = {};
+    for (const store of [...BACKUP_STORES, 'cryptoMeta']) {
+        idb[store] = JSON.stringify(await idbGetAllRaw(db, store));
+    }
+    return {
+        idb,
+        aiSettingsMirror: localStorage.getItem('finanzas:ai-settings:v1'),
+        settingsMirror: localStorage.getItem('finanzas:settings:v1'),
+        cryptoMetaMirror: localStorage.getItem('finanzas:crypto-meta:v1'),
+        fallbackMirrors: ['finanzas:gastos:v1', 'finanzas:budgets:v1', 'finanzas:recurring:v1', 'finanzas:custom-categories:v1']
+            .map(key => localStorage.getItem(key)),
+    };
+}
+
+describe('storage secure complete backup packages', () => {
+    it('exports absent encrypted stores as authenticated empty values that restore as absent', async () => {
+        await seedCompleteBackupState('source');
+        await storage.saveRecurring([]);
+        await storage.saveAiSettings(null);
+        await storage.clearCurrencySettings();
+
+        const bundle = await storage.exportAll();
+        await seedCompleteBackupState('destination');
+        const result = await storage.importAll(bundle, TEST_PASSPHRASE);
+
+        expect(bundle.stores.recurring).toHaveLength(1);
+        expect(bundle.stores.aiSettings).toHaveLength(1);
+        expect(bundle.stores.settings).toHaveLength(1);
+        expect(result).toEqual({ ok: true, errors: [] });
+        expect(await storage.loadRecurring()).toEqual([]);
+        expect(await storage.loadAiSettings()).toBeNull();
+        expect(await storage.loadCurrencySettings()).toBeNull();
+    });
+
+    it('round-trips one authenticated envelope for every encrypted store', async () => {
+        await seedCompleteBackupState('source');
+        const bundle = await storage.exportAll();
+        await seedCompleteBackupState('destination');
+
+        const result = await storage.importAll(bundle, TEST_PASSPHRASE);
+
+        expect(result).toEqual({ ok: true, errors: [] });
+        expect(await storage.load()).toEqual([{ ...sampleEntries[0], id: 'entry-source', descripcion: 'source' }]);
+        expect(await storage.loadBudgets()).toEqual({ 'Budget-source': 6 });
+        expect(await storage.loadRecurring()).toEqual([{ id: 'recurring-source', nombre: 'source', monto: 6, frecuencia: 'monthly' }]);
+        expect(await storage.loadCustomCategories()).toEqual([{ nombre: 'Category-source', tipo: 'expense' }]);
+        expect((await storage.loadAiSettings()).apiKey).toBe('key-source');
+        expect((await storage.loadCurrencySettings()).displayCurrency).toBe('source');
+    });
+
+    it('rejects corrupt but well-formed ciphertext before changing any persisted bytes', async () => {
+        await seedCompleteBackupState('source');
+        const bundle = cloneBundle(await storage.exportAll());
+        bundle.stores.entries[0] = corruptCiphertext(bundle.stores.entries[0]);
+        await seedCompleteBackupState('destination');
+        const before = await rawBackupSnapshot();
+
+        expect(await storage.importAll(bundle, TEST_PASSPHRASE)).toMatchObject({ ok: false });
+        expect(await rawBackupSnapshot()).toEqual(before);
+    });
+
+    it('rejects candidate metadata for a different key before changing persisted bytes', async () => {
+        await seedCompleteBackupState('source');
+        const bundle = cloneBundle(await storage.exportAll());
+        window.fpCrypto.reset();
+        bundle.cryptoMeta = { id: 'meta', ...await window.fpCrypto.init('different-passphrase') };
+        await storage.initKey(TEST_PASSPHRASE);
+        await seedCompleteBackupState('destination');
+        const before = await rawBackupSnapshot();
+
+        expect(await storage.importAll(bundle, 'different-passphrase')).toMatchObject({ ok: false });
+        expect(await rawBackupSnapshot()).toEqual(before);
+    });
+
+    it('rejects partial and duplicate-envelope packages without changing persisted bytes', async () => {
+        await seedCompleteBackupState('source');
+        const source = await storage.exportAll();
+        await seedCompleteBackupState('destination');
+        const before = await rawBackupSnapshot();
+        const partial = cloneBundle(source);
+        delete partial.stores.settings;
+        const duplicate = cloneBundle(source);
+        duplicate.stores.entries.push(cloneBundle(duplicate.stores.entries[0]));
+
+        expect(await storage.importAll(partial, TEST_PASSPHRASE)).toMatchObject({ ok: false });
+        expect(await storage.importAll(duplicate, TEST_PASSPHRASE)).toMatchObject({ ok: false });
+        expect(await rawBackupSnapshot()).toEqual(before);
+    });
+
+    it('rejects unknown fields, unsupported algorithms, and invalid base64 without changing persisted bytes', async () => {
+        await seedCompleteBackupState('source');
+        const source = await storage.exportAll();
+        await seedCompleteBackupState('destination');
+        const before = await rawBackupSnapshot();
+        const unknownField = cloneBundle(source);
+        unknownField.extra = true;
+        const unsupportedAlgorithm = cloneBundle(source);
+        unsupportedAlgorithm.stores.entries[0].alg = 'AES-GCM-128';
+        const invalidBase64 = cloneBundle(source);
+        invalidBase64.stores.entries[0].iv = 'not-base64!';
+
+        for (const invalidBundle of [unknownField, unsupportedAlgorithm, invalidBase64]) {
+            expect(await storage.importAll(invalidBundle, TEST_PASSPHRASE)).toMatchObject({ ok: false });
+        }
+        expect(await rawBackupSnapshot()).toEqual(before);
+    });
+
+    it('rolls back every store and metadata record when the replacement transaction aborts', async () => {
+        await seedCompleteBackupState('source');
+        const bundle = await storage.exportAll();
+        await seedCompleteBackupState('destination');
+        const before = await rawBackupSnapshot();
+        const putSpy = abortWritesFor('recurring');
+
+        try {
+            expect(await storage.importAll(bundle, TEST_PASSPHRASE)).toMatchObject({ ok: false });
+        } finally {
+            putSpy.mockRestore();
+        }
+        expect(await rawBackupSnapshot()).toEqual(before);
+    });
+});

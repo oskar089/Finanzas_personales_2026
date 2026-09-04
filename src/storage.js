@@ -284,6 +284,7 @@ async function idbGetAiSettings(db) {
     const rec = await idbGetRaw(db, AI_SETTINGS_STORE, 'active');
     if (rec && isEnvelope(rec)) {
         const payload = await decryptEncryptedPayload(AI_SETTINGS_STORE, rec);
+        if (payload === null) return null;
         if (!isObjectRecord(payload)) throw new EncryptedStorageReadError(AI_SETTINGS_STORE);
         return payload;
     }
@@ -302,6 +303,7 @@ async function idbGetSettings(db) {
     const rec = await idbGetRaw(db, SETTINGS_STORE, 'active');
     if (rec && isEnvelope(rec)) {
         const payload = await decryptEncryptedPayload(SETTINGS_STORE, rec);
+        if (payload === null) return null;
         if (!isObjectRecord(payload)) throw new EncryptedStorageReadError(SETTINGS_STORE);
         return payload;
     }
@@ -423,6 +425,7 @@ async function lsLoadAiSettings() {
     }
     if (isEnvelope(parsed)) {
         const plain = await decryptEncryptedPayload(AI_SETTINGS_STORE, parsed);
+        if (plain === null) return null;
         if (!isObjectRecord(plain)) throw new EncryptedStorageReadError(AI_SETTINGS_STORE);
         return plain;
     }
@@ -446,6 +449,7 @@ async function lsLoadSettings() {
     }
     if (isEnvelope(parsed)) {
         const plain = await decryptEncryptedPayload(SETTINGS_STORE, parsed);
+        if (plain === null) return null;
         if (!isObjectRecord(plain)) throw new EncryptedStorageReadError(SETTINGS_STORE);
         return plain;
     }
@@ -1117,13 +1121,188 @@ async function clearCurrencySettings() {
     localStorage.removeItem(LS_SETTINGS_KEY);
 }
 
+// --- Secure backup packages -----------------------------------------------
+
+const BACKUP_STORES = [STORE_NAME, BUDGETS_STORE, RECURRING_STORE, CUSTOM_CATEGORIES_STORE, AI_SETTINGS_STORE, SETTINGS_STORE];
+const BACKUP_VERSION = 1;
+const BACKUP_TOP_LEVEL_KEYS = ['version', 'dbVersion', 'timestamp', 'cryptoMeta', 'stores'];
+const CRYPTO_META_KEYS = ['id', 'v', 'alg', 'iterations', 'salt', 'wrappedDek', 'updatedAt'];
+const ENVELOPE_KEYS = ['v', 'alg', 'salt', 'iv', 'ct'];
+const BASE64_RE = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
+
+function hasExactKeys(record, keys) {
+    return isObjectRecord(record) && Object.keys(record).length === keys.length
+        && keys.every(key => Object.prototype.hasOwnProperty.call(record, key));
+}
+
+function isBase64(value, byteLength) {
+    if (typeof value !== 'string' || !BASE64_RE.test(value)) return false;
+    try {
+        const decoded = atob(value);
+        return byteLength === undefined || decoded.length === byteLength;
+    } catch {
+        return false;
+    }
+}
+
+function isValidCryptoMeta(meta) {
+    return hasExactKeys(meta, CRYPTO_META_KEYS)
+        && meta.id === 'meta'
+        && meta.v === 1
+        && meta.alg === 'PBKDF2-SHA256'
+        && meta.iterations === 600000
+        && isBase64(meta.salt, 16)
+        && isBase64(meta.wrappedDek, 48)
+        && Number.isFinite(meta.updatedAt);
+}
+
+function isValidEnvelopeRecord(store, record, meta) {
+    const keyField = STORE_KEY_FIELD[store];
+    return hasExactKeys(record, [keyField, ...ENVELOPE_KEYS])
+        && record[keyField] === storeKeyFor(store)
+        && record.v === 1
+        && record.alg === 'AES-GCM-256'
+        && record.salt === meta.salt
+        && isBase64(record.salt, 16)
+        && isBase64(record.iv, 12)
+        && isBase64(record.ct)
+        && atob(record.ct).length >= 16;
+}
+
+function isValidBackupTimestamp(timestamp) {
+    try {
+        return typeof timestamp === 'string' && new Date(timestamp).toISOString() === timestamp;
+    } catch {
+        return false;
+    }
+}
+
+function validateBackupPackage(bundle) {
+    if (!hasExactKeys(bundle, BACKUP_TOP_LEVEL_KEYS)
+        || bundle.version !== BACKUP_VERSION
+        || bundle.dbVersion !== DB_VERSION
+        || !isValidBackupTimestamp(bundle.timestamp)
+        || !isValidCryptoMeta(bundle.cryptoMeta)
+        || !hasExactKeys(bundle.stores, BACKUP_STORES)) {
+        return false;
+    }
+
+    return BACKUP_STORES.every(store => {
+        const records = bundle.stores[store];
+        return Array.isArray(records) && records.length === 1
+            && isValidEnvelopeRecord(store, records[0], bundle.cryptoMeta);
+    });
+}
+
+function isValidBackupPayload(store, payload) {
+    return (store === AI_SETTINGS_STORE || store === SETTINGS_STORE)
+        ? payload === null || (isObjectRecord(payload) && payload.id === 'active')
+        : Array.isArray(payload);
+}
+
+function emptyBackupPayload(store) {
+    return (store === AI_SETTINGS_STORE || store === SETTINGS_STORE) ? null : [];
+}
+
+async function authenticateBackupPackage(bundle) {
+    for (const store of BACKUP_STORES) {
+        const payload = await fpCrypto.decryptPayload(store, bundle.stores[store][0]);
+        if (!isValidBackupPayload(store, payload)) throw new Error(`Invalid ${store} payload`);
+    }
+}
+
+function commitBackupPackage(db, bundle) {
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction([...BACKUP_STORES, CRYPTO_META_STORE], 'readwrite');
+        tx.oncomplete = resolve;
+        tx.onerror = () => reject(tx.error || new Error('Backup replacement failed'));
+        tx.onabort = () => reject(tx.error || new Error('Backup replacement aborted'));
+
+        try {
+            for (const store of BACKUP_STORES) {
+                const objectStore = tx.objectStore(store);
+                objectStore.clear();
+                objectStore.put(bundle.stores[store][0]);
+            }
+            const metaStore = tx.objectStore(CRYPTO_META_STORE);
+            metaStore.clear();
+            metaStore.put(bundle.cryptoMeta);
+        } catch (err) {
+            try { tx.abort(); } catch { /* Transaction already aborted. */ }
+            reject(err);
+        }
+    });
+}
+
+function mirrorImportedBackup(bundle) {
+    localStorage.setItem(LS_AI_SETTINGS_KEY, JSON.stringify(bundle.stores[AI_SETTINGS_STORE][0]));
+    localStorage.setItem(LS_SETTINGS_KEY, JSON.stringify(bundle.stores[SETTINGS_STORE][0]));
+    localStorage.setItem(LS_CRYPTO_META_KEY, JSON.stringify(bundle.cryptoMeta));
+}
+
+async function exportAll() {
+    assertKeyReady();
+    const db = await openDB();
+    try {
+        const stores = {};
+        for (const store of BACKUP_STORES) {
+            const records = await idbGetAllRaw(db, store);
+            stores[store] = records.length === 0
+                ? [await encryptAndRecord(store, emptyBackupPayload(store))]
+                : records;
+        }
+        const metaRecords = await idbGetAllRaw(db, CRYPTO_META_STORE);
+        const cryptoMeta = metaRecords.length === 1 && metaRecords[0].id === 'meta' ? metaRecords[0] : null;
+        const bundle = {
+            version: BACKUP_VERSION,
+            dbVersion: DB_VERSION,
+            timestamp: new Date().toISOString(),
+            cryptoMeta,
+            stores,
+        };
+        if (!validateBackupPackage(bundle)) throw new Error('Cannot export an incomplete encrypted snapshot.');
+        await authenticateBackupPackage(bundle);
+        return bundle;
+    } finally {
+        db.close();
+    }
+}
+
+async function importAll(bundle, passphrase) {
+    if (!validateBackupPackage(bundle)) return { ok: false, errors: ['Invalid backup package.'] };
+
+    try {
+        await fpCrypto.init(passphrase, bundle.cryptoMeta);
+        await authenticateBackupPackage(bundle);
+    } catch {
+        // A candidate key that authenticated metadata but not every store is unsafe.
+        // Lock rather than leaving a candidate key able to write existing ciphertext.
+        fpCrypto.reset();
+        return { ok: false, errors: ['Backup authentication failed.'] };
+    }
+
+    let db;
+    try {
+        db = await openDB();
+        await commitBackupPackage(db, bundle);
+    } catch {
+        fpCrypto.reset();
+        return { ok: false, errors: ['Backup replacement failed.'] };
+    } finally {
+        if (db) db.close();
+    }
+
+    mirrorImportedBackup(bundle);
+    return { ok: true, errors: [] };
+}
+
 // --- Exports ---------------------------------------------------------
 
 // Soporte tanto para Node.js (vitest) como navegador
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { load, save, clear, loadBudgets, saveBudgets, loadRecurring, saveRecurring, loadCustomCategories, saveCustomCategories, loadAiSettings, saveAiSettings, loadCurrencySettings, saveCurrencySettings, clearCurrencySettings, isIDBAvailable, initKey, changePassphrase, hasEncryptionKey, migrateEncryption, migrateLsKeysWhenIdbDown, MigrationVerifyError, EncryptedStorageReadError, rawGetAll, rawPut, rawClear, MIGRATION_PLAN };
+    module.exports = { load, save, clear, loadBudgets, saveBudgets, loadRecurring, saveRecurring, loadCustomCategories, saveCustomCategories, loadAiSettings, saveAiSettings, loadCurrencySettings, saveCurrencySettings, clearCurrencySettings, isIDBAvailable, initKey, changePassphrase, hasEncryptionKey, migrateEncryption, migrateLsKeysWhenIdbDown, MigrationVerifyError, EncryptedStorageReadError, rawGetAll, rawPut, rawClear, exportAll, importAll, MIGRATION_PLAN };
 }
 
 if (typeof window !== 'undefined') {
-    window.storage = { load, save, clear, loadBudgets, saveBudgets, loadRecurring, saveRecurring, loadCustomCategories, saveCustomCategories, loadAiSettings, saveAiSettings, loadCurrencySettings, saveCurrencySettings, clearCurrencySettings, initKey, changePassphrase, hasEncryptionKey };
+    window.storage = { load, save, clear, loadBudgets, saveBudgets, loadRecurring, saveRecurring, loadCustomCategories, saveCustomCategories, loadAiSettings, saveAiSettings, loadCurrencySettings, saveCurrencySettings, clearCurrencySettings, initKey, changePassphrase, hasEncryptionKey, exportAll, importAll };
 }
