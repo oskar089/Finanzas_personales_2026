@@ -29,6 +29,12 @@ A Progressive Web App to track personal finances (expenses, income and savings) 
 - Service Worker for offline support (network-first for local assets, cache-first for CDN).
 - One-click launcher (`start.bat`) for Windows.
 
+## Secure Manual Backup and Restore
+
+- Provide the backup passphrase when importing a backup.
+- The app restores only complete snapshots that authenticate successfully.
+- A failed import keeps the app locked until you reload it or unlock it with the correct passphrase.
+
 ## Tech Stack
 
 - HTML5
