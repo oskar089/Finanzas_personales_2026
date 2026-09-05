@@ -160,20 +160,23 @@ describe('storage.save()', () => {
         expect(result).toHaveLength(0);
     });
 
-    it('retains the prior encrypted envelope when an entries replacement write aborts', async () => {
+    it('rejects when an entries replacement write aborts: save fails and both stores keep the prior envelope', async () => {
         await storage.save(sampleEntries);
         const db = await openRawDb();
         const [priorEnvelope] = await idbGetAllRaw(db, 'entries');
+        const priorLs = localStorage.getItem('finanzas:gastos:v1');
         const putSpy = abortWritesFor('entries');
 
         try {
-            await storage.save([{ ...sampleEntries[0], id: 'replacement-entry' }]);
+            await expect(storage.save([{ ...sampleEntries[0], id: 'replacement-entry' }]))
+                .rejects.toThrow('Injected write failure');
         } finally {
             putSpy.mockRestore();
         }
 
         const [persistedEnvelope] = await idbGetAllRaw(db, 'entries');
-        expect(persistedEnvelope).toEqual(priorEnvelope);
+        expect(JSON.stringify(persistedEnvelope)).toBe(JSON.stringify(priorEnvelope));
+        expect(localStorage.getItem('finanzas:gastos:v1')).toBe(priorLs);
         await expect(storage.load()).resolves.toEqual(sampleEntries);
     });
 });
@@ -195,41 +198,47 @@ describe('storage.loadBudgets()', () => {
 });
 
 describe('storage.saveBudgets()', () => {
-    it('retains the prior encrypted envelope when a budgets replacement write aborts', async () => {
+    it('rejects when a budgets replacement write aborts: save fails and both stores keep the prior envelope', async () => {
         const priorBudgets = { Comida: 500 };
         await storage.saveBudgets(priorBudgets);
         const db = await openRawDb();
         const [priorEnvelope] = await idbGetAllRaw(db, 'budgets');
+        const priorLs = localStorage.getItem('finanzas:budgets:v1');
         const putSpy = abortWritesFor('budgets');
 
         try {
-            await storage.saveBudgets({ Transporte: 300 });
+            await expect(storage.saveBudgets({ Transporte: 300 }))
+                .rejects.toThrow('Injected write failure');
         } finally {
             putSpy.mockRestore();
         }
 
         const [persistedEnvelope] = await idbGetAllRaw(db, 'budgets');
-        expect(persistedEnvelope).toEqual(priorEnvelope);
+        expect(JSON.stringify(persistedEnvelope)).toBe(JSON.stringify(priorEnvelope));
+        expect(localStorage.getItem('finanzas:budgets:v1')).toBe(priorLs);
         await expect(storage.loadBudgets()).resolves.toEqual(priorBudgets);
     });
 });
 
 describe('storage.saveRecurring()', () => {
-    it('retains the prior encrypted envelope when a recurring replacement write aborts', async () => {
+    it('rejects when a recurring replacement write aborts: save fails and both stores keep the prior envelope', async () => {
         const priorRecurring = [{ id: 'monthly-rent', nombre: 'Rent', monto: 900, frecuencia: 'monthly' }];
         await storage.saveRecurring(priorRecurring);
         const db = await openRawDb();
         const [priorEnvelope] = await idbGetAllRaw(db, 'recurring');
+        const priorLs = localStorage.getItem('finanzas:recurring:v1');
         const putSpy = abortWritesFor('recurring');
 
         try {
-            await storage.saveRecurring([{ id: 'music-plan', nombre: 'Music', monto: 10, frecuencia: 'monthly' }]);
+            await expect(storage.saveRecurring([{ id: 'music-plan', nombre: 'Music', monto: 10, frecuencia: 'monthly' }]))
+                .rejects.toThrow('Injected write failure');
         } finally {
             putSpy.mockRestore();
         }
 
         const [persistedEnvelope] = await idbGetAllRaw(db, 'recurring');
-        expect(persistedEnvelope).toEqual(priorEnvelope);
+        expect(JSON.stringify(persistedEnvelope)).toBe(JSON.stringify(priorEnvelope));
+        expect(localStorage.getItem('finanzas:recurring:v1')).toBe(priorLs);
         await expect(storage.loadRecurring()).resolves.toEqual(priorRecurring);
     });
 });
@@ -333,21 +342,24 @@ describe('storage.saveCustomCategories() / loadCustomCategories()', () => {
 });
 
 describe('storage.saveCustomCategories()', () => {
-    it('retains the prior encrypted envelope when a categories replacement write aborts', async () => {
+    it('rejects when a categories replacement write aborts: save fails and both stores keep the prior envelope', async () => {
         const priorCategories = [sampleCustomCategories[0]];
         await storage.saveCustomCategories(priorCategories);
         const db = await openRawDb();
         const [priorEnvelope] = await idbGetAllRaw(db, 'customCategories');
+        const priorLs = localStorage.getItem('finanzas:custom-categories:v1');
         const putSpy = abortWritesFor('customCategories');
 
         try {
-            await storage.saveCustomCategories([sampleCustomCategories[1]]);
+            await expect(storage.saveCustomCategories([sampleCustomCategories[1]]))
+                .rejects.toThrow('Injected write failure');
         } finally {
             putSpy.mockRestore();
         }
 
         const [persistedEnvelope] = await idbGetAllRaw(db, 'customCategories');
-        expect(persistedEnvelope).toEqual(priorEnvelope);
+        expect(JSON.stringify(persistedEnvelope)).toBe(JSON.stringify(priorEnvelope));
+        expect(localStorage.getItem('finanzas:custom-categories:v1')).toBe(priorLs);
         await expect(storage.loadCustomCategories()).resolves.toEqual(priorCategories);
     });
 });
@@ -394,6 +406,30 @@ describe('storage.saveAiSettings() / loadAiSettings()', () => {
         } finally {
             globalThis.indexedDB = original;
         }
+    });
+
+    it('rejects when the IDB dual-write aborts: save fails and both mirrors keep the prior envelope', async () => {
+        const priorAiSettings = { ...sampleAiSettings, model: 'gpt-4o' };
+        await storage.saveAiSettings(priorAiSettings);
+        const db = await openRawDb();
+        const priorIdb = await idbGetRaw(db, 'aiSettings', 'active');
+        const priorLs = localStorage.getItem('finanzas:ai-settings:v1');
+        expect(priorLs).toBeTruthy();
+
+        const putSpy = abortWritesFor('aiSettings');
+        try {
+            await expect(storage.saveAiSettings({ ...sampleAiSettings, model: 'gpt-4o-mini' }))
+                .rejects.toThrow('Injected write failure');
+        } finally {
+            putSpy.mockRestore();
+        }
+
+        const afterIdb = await idbGetRaw(db, 'aiSettings', 'active');
+        expect(JSON.stringify(afterIdb)).toBe(JSON.stringify(priorIdb));
+        expect(localStorage.getItem('finanzas:ai-settings:v1')).toBe(priorLs);
+        const loaded = await storage.loadAiSettings();
+        expect(loaded.apiKey).toBe('sk-test');
+        expect(loaded.model).toBe('gpt-4o');
     });
 });
 
@@ -463,6 +499,30 @@ describe('storage.saveCurrencySettings() / loadCurrencySettings()', () => {
         const loaded = await storage.loadCurrencySettings();
         expect(loaded).toBeNull();
         expect(localStorage.getItem('finanzas:settings:v1')).toBeNull();
+    });
+
+    it('rejects when the IDB dual-write aborts: save fails and both mirrors keep the prior envelope', async () => {
+        const priorSettings = { baseCurrency: 'EUR', displayCurrency: 'USD', rates: { USD: 1.1 } };
+        await storage.saveCurrencySettings(priorSettings);
+        const db = await openRawDb();
+        const priorIdb = await idbGetRaw(db, 'settings', 'active');
+        const priorLs = localStorage.getItem('finanzas:settings:v1');
+        expect(priorLs).toBeTruthy();
+
+        const putSpy = abortWritesFor('settings');
+        try {
+            await expect(storage.saveCurrencySettings({ baseCurrency: 'EUR', displayCurrency: 'GBP', rates: { GBP: 0.85 } }))
+                .rejects.toThrow('Injected write failure');
+        } finally {
+            putSpy.mockRestore();
+        }
+
+        const afterIdb = await idbGetRaw(db, 'settings', 'active');
+        expect(JSON.stringify(afterIdb)).toBe(JSON.stringify(priorIdb));
+        expect(localStorage.getItem('finanzas:settings:v1')).toBe(priorLs);
+        const loaded = await storage.loadCurrencySettings();
+        expect(loaded.displayCurrency).toBe('USD');
+        expect(loaded.rates.USD).toBe(1.1);
     });
 });
 

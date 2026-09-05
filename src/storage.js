@@ -801,20 +801,18 @@ async function load() {
 async function save(entries) {
     assertKeyReady(); // gate: sin clave resuelta no hay escritura
     if (!isIDBAvailable()) {
+        // Modo degradado intencional: sin IDB no hay espejo que diverja
         await lsSave(entries);
         return;
     }
 
+    // Fail-closed: si el write a IDB falla, el save RECHAZA y LS no se toca,
+    // para que ambos stores conserven el envelope consistente previo.
+    const db = await openDB();
     try {
-        const db = await openDB();
-        try {
-            await idbReplaceAll(db, STORE_NAME, entries);
-        } finally {
-            db.close();
-        }
-    } catch {
-        // Fallback a localStorage si IndexedDB falla
-        await lsSave(entries);
+        await idbReplaceAll(db, STORE_NAME, entries);
+    } finally {
+        db.close();
     }
 }
 
@@ -862,21 +860,19 @@ async function loadBudgets() {
 
 async function saveBudgets(budgets) {
     if (!isIDBAvailable()) {
+        // Modo degradado intencional: sin IDB no hay espejo que diverja
         await lsSaveBudgets(budgets);
         return;
     }
 
+    // Fail-closed: si el write a IDB falla, el save RECHAZA y LS no se toca
+    const db = await openDB();
     try {
-        const db = await openDB();
-        try {
-            // Convertir objeto {categoria: monto} a array de {categoria, monto}
-            const arr = Object.entries(budgets).map(([categoria, monto]) => ({ categoria, monto }));
-            await idbReplaceAll(db, BUDGETS_STORE, arr);
-        } finally {
-            db.close();
-        }
-    } catch {
-        await lsSaveBudgets(budgets);
+        // Convertir objeto {categoria: monto} a array de {categoria, monto}
+        const arr = Object.entries(budgets).map(([categoria, monto]) => ({ categoria, monto }));
+        await idbReplaceAll(db, BUDGETS_STORE, arr);
+    } finally {
+        db.close();
     }
 }
 
@@ -903,19 +899,17 @@ async function loadRecurring() {
 
 async function saveRecurring(recurring) {
     if (!isIDBAvailable()) {
+        // Modo degradado intencional: sin IDB no hay espejo que diverja
         await lsSaveRecurring(recurring);
         return;
     }
 
+    // Fail-closed: si el write a IDB falla, el save RECHAZA y LS no se toca
+    const db = await openDB();
     try {
-        const db = await openDB();
-        try {
-            await idbReplaceAll(db, RECURRING_STORE, recurring);
-        } finally {
-            db.close();
-        }
-    } catch {
-        await lsSaveRecurring(recurring);
+        await idbReplaceAll(db, RECURRING_STORE, recurring);
+    } finally {
+        db.close();
     }
 }
 
@@ -941,19 +935,17 @@ async function loadCustomCategories() {
 
 async function saveCustomCategories(categories) {
     if (!isIDBAvailable()) {
+        // Modo degradado intencional: sin IDB no hay espejo que diverja
         await lsSaveCustomCategories(categories);
         return;
     }
 
+    // Fail-closed: si el write a IDB falla, el save RECHAZA y LS no se toca
+    const db = await openDB();
     try {
-        const db = await openDB();
-        try {
-            await idbReplaceAll(db, CUSTOM_CATEGORIES_STORE, categories);
-        } finally {
-            db.close();
-        }
-    } catch {
-        await lsSaveCustomCategories(categories);
+        await idbReplaceAll(db, CUSTOM_CATEGORIES_STORE, categories);
+    } finally {
+        db.close();
     }
 }
 
@@ -1006,24 +998,22 @@ async function saveAiSettings(settings) {
     const record = { ...settings, id: 'active', updatedAt: Date.now() };
 
     if (!isIDBAvailable()) {
+        // Modo degradado intencional: sin IDB no hay espejo que diverja
         const rec = await encryptAndRecord(AI_SETTINGS_STORE, record);
         localStorage.setItem(LS_AI_SETTINGS_KEY, JSON.stringify(rec));
         return;
     }
 
+    // Fail-closed: si el write a IDB falla, el save RECHAZA y el espejo LS no
+    // se toca: ambos stores conservan el envelope consistente previo (DE11).
+    const db = await openDB();
     try {
-        const db = await openDB();
-        try {
-            // Dual-write: un solo encrypt, el MISMO envelope a IDB y al espejo LS (DE11)
-            const rec = await encryptAndRecord(AI_SETTINGS_STORE, record);
-            await idbPutRaw(db, AI_SETTINGS_STORE, rec);
-            localStorage.setItem(LS_AI_SETTINGS_KEY, JSON.stringify(rec));
-        } finally {
-            db.close();
-        }
-    } catch {
+        // Dual-write: un solo encrypt, el MISMO envelope a IDB y al espejo LS (DE11)
         const rec = await encryptAndRecord(AI_SETTINGS_STORE, record);
+        await idbPutRaw(db, AI_SETTINGS_STORE, rec);
         localStorage.setItem(LS_AI_SETTINGS_KEY, JSON.stringify(rec));
+    } finally {
+        db.close();
     }
 }
 
@@ -1076,24 +1066,22 @@ async function saveCurrencySettings(settings) {
     const record = { ...settings, id: 'active', updatedAt: Date.now() };
 
     if (!isIDBAvailable()) {
+        // Modo degradado intencional: sin IDB no hay espejo que diverja
         const rec = await encryptAndRecord(SETTINGS_STORE, record);
         localStorage.setItem(LS_SETTINGS_KEY, JSON.stringify(rec));
         return;
     }
 
+    // Fail-closed: si el write a IDB falla, el save RECHAZA y el espejo LS no
+    // se toca: ambos stores conservan el envelope consistente previo (DE13).
+    const db = await openDB();
     try {
-        const db = await openDB();
-        try {
-            // Dual-write: un solo encrypt, el MISMO envelope a IDB y al espejo LS (DE13)
-            const rec = await encryptAndRecord(SETTINGS_STORE, record);
-            await idbPutRaw(db, SETTINGS_STORE, rec);
-            localStorage.setItem(LS_SETTINGS_KEY, JSON.stringify(rec));
-        } finally {
-            db.close();
-        }
-    } catch {
+        // Dual-write: un solo encrypt, el MISMO envelope a IDB y al espejo LS (DE13)
         const rec = await encryptAndRecord(SETTINGS_STORE, record);
+        await idbPutRaw(db, SETTINGS_STORE, rec);
         localStorage.setItem(LS_SETTINGS_KEY, JSON.stringify(rec));
+    } finally {
+        db.close();
     }
 }
 
