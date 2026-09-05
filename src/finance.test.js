@@ -700,6 +700,29 @@ describe('generateRecurringEntries()', () => {
         const result = finance.generateRecurringEntries(recurring29, entries, currentMonth);
         expect(result).toHaveLength(0);
     });
+
+    it('no genera en el mes actual si el día del recurrente aún no llegó', () => {
+        const futureDay = Math.min(today + 1, 28);
+        const recurringFuture = [
+            { id: 'r7', tipo: 'expense', monto: 99, categoria: 'Test', descripcion: 'Futuro', diaMes: futureDay, fechaInicio: '2026-01', activo: true }
+        ];
+        const result = finance.generateRecurringEntries(recurringFuture, entries, currentMonth);
+        const futuro = result.find(r => r.descripcion === 'Futuro');
+        // Determinista: si el día aún no llegó (today < 28), NO debe generarse.
+        // A fin de mes (today >= 28) el día 28 ya llegó y puede generarse.
+        if (today < 28) {
+            expect(futuro).toBeUndefined();
+        }
+    });
+
+    it('genera en meses anteriores aunque el día ya pasó', () => {
+        const recurringPast = [
+            { id: 'r8', tipo: 'expense', monto: 77, categoria: 'Test', descripcion: 'Pasado', diaMes: 28, fechaInicio: '2026-01', activo: true }
+        ];
+        const result = finance.generateRecurringEntries(recurringPast, [], prevMonth);
+        const pasado = result.find(r => r.descripcion === 'Pasado');
+        expect(pasado).toBeDefined();
+    });
 });
 
 // -------------------------------------------------------------------

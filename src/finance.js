@@ -369,6 +369,13 @@ function generateRecurringEntries(recurring, entries, month) {
             return; // aún no empezó
         }
 
+        // En el MES ACTUAL, no generar si el día del recurrente aún no llegó:
+        // un entry con fecha futura dentro del mes rompe filtros y órdenes.
+        // En meses pasados sí se genera (completa el historial si faltó).
+        if (isCurrentMonth && r.diaMes > today) {
+            return;
+        }
+
         // Verificar si ya existe entry para este recurrente en este mes
         const targetDate = `${year}-${String(mon).padStart(2, '0')}-${String(r.diaMes).padStart(2, '0')}`;
         const exists = entries.some(e =>
