@@ -651,7 +651,7 @@
     <script src="app.js"></script>
     <script>
         if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('/sw.js').then(reg => {
+            navigator.serviceWorker.register('./sw.js').then(reg => {
                 // Chequear actualizaciones cada vez que se carga la página
                 reg.update();
                 // Cuando haya un nuevo SW, recargar automáticamente

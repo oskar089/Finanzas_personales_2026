@@ -5,18 +5,20 @@
 // Cache-first para CDN (no cambian y tienen SRI).
 // =====================================================================
 
-const CACHE_NAME = 'finanzas-v6';
+const CACHE_NAME = 'finanzas-v7';
+// Rutas relativas: en GitHub Pages el sitio se sirve en un subpath
+// (https://<user>.github.io/<repo>/), y los assets absolutos con "/" romperían.
 const ASSETS = [
-    '/',
-    '/index.html',
-    '/styles.css',
-    '/app.js',
-    '/src/finance.js',
-    '/src/crypto.js',
-    '/src/boot.js',
-    '/src/storage.js',
-    '/src/cloud-sync.js',
-    '/vendor/xlsx.full.min.js',
+    './',
+    './index.html',
+    './styles.css',
+    './app.js',
+    './src/finance.js',
+    './src/crypto.js',
+    './src/boot.js',
+    './src/storage.js',
+    './src/cloud-sync.js',
+    './vendor/xlsx.full.min.js',
     'https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css',
     'https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js'
 ];
