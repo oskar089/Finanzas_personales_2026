@@ -1882,13 +1882,11 @@ function importXLSX(file) {
                     tipo: normalized.tipo,
                     amount: normalized.monto,
                     category: normalized.categoria,
-                    description: normalized.descripcion
+                    description: normalized.descripcion,
+                    fecha: normalized.fecha
                 });
-                const fechaValida = typeof normalized.fecha === 'string' &&
-                    /^\d{4}-\d{2}-\d{2}$/.test(normalized.fecha) &&
-                    !isNaN(Date.parse(normalized.fecha));
 
-                if (errors.length === 0 && fechaValida && isFinite(normalized.monto)) {
+                if (errors.length === 0) {
                     incoming.push(normalized);
                 } else {
                     skipped++;
@@ -1995,7 +1993,7 @@ async function init() {
         const description = document.getElementById('description').value;
         const date = document.getElementById('date').value;
 
-        const errors = validateEntry({ tipo, amount, category, description });
+        const errors = validateEntry({ tipo, amount, category, description, fecha: date });
         if (errors.length > 0) {
             toast.showError(errors[0]);
             return;

@@ -273,7 +273,8 @@ describe('validateEntry()', () => {
         tipo: 'expense',
         amount: '100',
         category: 'Comida',
-        description: 'Compra de prueba'
+        description: 'Compra de prueba',
+        fecha: '2026-08-15'
     };
 
     it('entrada valida devuelve array vacio', () => {
@@ -339,6 +340,24 @@ describe('validateEntry()', () => {
         const errors = finance.validateEntry({ ...validEntry, amount: '-50' });
         expect(errors.length).toBeGreaterThanOrEqual(1);
         expect(errors[0]).toMatch(/monto/i);
+    });
+
+    it('fecha vacia agrega error', () => {
+        const errors = finance.validateEntry({ ...validEntry, fecha: '' });
+        expect(errors.length).toBeGreaterThanOrEqual(1);
+        expect(errors[0]).toMatch(/fecha/i);
+    });
+
+    it('fecha con formato invalido agrega error', () => {
+        const errors = finance.validateEntry({ ...validEntry, fecha: '15/08/2026' });
+        expect(errors.length).toBeGreaterThanOrEqual(1);
+        expect(errors[0]).toMatch(/fecha/i);
+    });
+
+    it('fecha imposible (2026-02-31) agrega error', () => {
+        const errors = finance.validateEntry({ ...validEntry, fecha: '2026-02-31' });
+        expect(errors.length).toBeGreaterThanOrEqual(1);
+        expect(errors[0]).toMatch(/fecha/i);
     });
 });
 
@@ -446,6 +465,21 @@ describe('calculateDailyAverage()', () => {
             '2026-08'
         );
         expect(result).toBe(resultAll);
+    });
+
+    it('excluye savings de los gastos', () => {
+        // savings es transferencia: no cuenta como gasto del promedio diario
+        const withSavings = [
+            ...entries,
+            { tipo: 'savings', monto: 500, fecha: '2026-08-02' },
+            { tipo: 'savings', monto: 500, fecha: '2026-08-03' },
+        ];
+        const result = finance.calculateDailyAverage(withSavings, '2026-08');
+        const resultPlain = finance.calculateDailyAverage(
+            withSavings.filter(e => e.tipo === 'expense'),
+            '2026-08'
+        );
+        expect(result).toBe(resultPlain);
     });
 
     it('devuelve 0 si no hay gastos en el mes', () => {
@@ -567,6 +601,17 @@ describe('calculateBudgetProgress()', () => {
         const result = finance.calculateBudgetProgress(entries80, { Comida: 437.5 }, '2026-08');
         expect(result[0].estado).toBe('advertencia');
     });
+
+    it('savings no consume presupuesto', () => {
+        // savings es transferencia: no debe gastar la categoría presupuestada
+        const withSavings = [
+            { tipo: 'expense', monto: 300, categoria: 'Inversiones', fecha: '2026-08-01' },
+            { tipo: 'savings', monto: 1000, categoria: 'Inversiones', fecha: '2026-08-02' },
+        ];
+        const result = finance.calculateBudgetProgress(withSavings, { Inversiones: 500 }, '2026-08');
+        expect(result[0].actual).toBe(300);
+        expect(result[0].porcentaje).toBe(60);
+    });
 });
 
 // -------------------------------------------------------------------
@@ -574,8 +619,8 @@ describe('calculateBudgetProgress()', () => {
 // -------------------------------------------------------------------
 describe('calculateMonthlyTrend()', () => {
     const now = new Date();
-    const year = now.getUTCFullYear();
-    const month = now.getUTCMonth() + 1;
+    const year = now.getFullYear();
+    const month = now.getMonth() + 1;
     const currentMonth = `${year}-${String(month).padStart(2, '0')}`;
     const prevMonth = month > 1 ? `${year}-${String(month - 1).padStart(2, '0')}` : `${year - 1}-12`;
 
@@ -633,6 +678,19 @@ describe('calculateMonthlyTrend()', () => {
             expect(result[i].mes >= result[i - 1].mes).toBe(true);
         }
     });
+
+    it('excluye savings de gastos en la tendencia', () => {
+        // savings es transferencia: no infla los gastos del gráfico
+        const withSavings = [
+            ...entries,
+            { tipo: 'savings', monto: 9999, fecha: `${currentMonth}-02` },
+        ];
+        const result = finance.calculateMonthlyTrend(withSavings);
+        const curr = result.find(r => r.mes === currentMonth);
+        expect(curr.gastos).toBe(800);
+        expect(curr.ingresos).toBe(2000);
+        expect(curr.balance).toBe(1200);
+    });
 });
 
 // -------------------------------------------------------------------
@@ -640,11 +698,11 @@ describe('calculateMonthlyTrend()', () => {
 // -------------------------------------------------------------------
 describe('generateRecurringEntries()', () => {
     const now = new Date();
-    const year = now.getUTCFullYear();
-    const month = now.getUTCMonth() + 1;
+    const year = now.getFullYear();
+    const month = now.getMonth() + 1;
     const currentMonth = `${year}-${String(month).padStart(2, '0')}`;
     const prevMonth = month > 1 ? `${year}-${String(month - 1).padStart(2, '0')}` : `${year - 1}-12`;
-    const today = now.getUTCDate();
+    const today = now.getDate();
 
     const recurring = [
         { id: 'r1', tipo: 'expense', monto: 500, categoria: 'Hogar', descripcion: 'Alquiler', diaMes: 1, fechaInicio: '2026-01', activo: true },

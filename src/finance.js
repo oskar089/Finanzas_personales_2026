@@ -197,12 +197,13 @@ function parseAmount(value) {
     return Number(s);
 }
 
-function validateEntry({ tipo, amount, category, description } = {}) {
+function validateEntry({ tipo, amount, category, description, fecha } = {}) {
     const errors = [];
     if (!tipo || (tipo !== 'expense' && tipo !== 'income' && tipo !== 'savings')) {
         errors.push('Seleccioná un tipo válido.');
     }
-    if (amount === undefined || amount === null || amount === '' || parseAmount(amount) <= 0) {
+    const parsedAmount = amount === undefined || amount === null ? NaN : parseAmount(amount);
+    if (amount === undefined || amount === null || amount === '' || !isFinite(parsedAmount) || parsedAmount <= 0) {
         errors.push('El monto tiene que ser mayor a 0.');
     }
     if (!category || !category.trim()) {
@@ -211,24 +212,36 @@ function validateEntry({ tipo, amount, category, description } = {}) {
     if (!description || !description.trim()) {
         errors.push('Agregá una descripción.');
     }
+    if (!isValidDateString(fecha)) {
+        errors.push('Ingresá una fecha válida (YYYY-MM-DD).');
+    }
     return errors;
+}
+
+// Pura: valida una fecha en formato YYYY-MM-DD. Rechaza vacío, formatos raros
+// ('15/08/2026') y fechas imposibles ('2026-02-31').
+function isValidDateString(fecha) {
+    if (typeof fecha !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(fecha)) return false;
+    const [y, m, d] = fecha.split('-').map(Number);
+    const date = new Date(y, m - 1, d);
+    return date.getFullYear() === y && date.getMonth() === m - 1 && date.getDate() === d;
 }
 
 // --- Dashboard: funciones de métricas --------------------------------
 
 function getDaysInMonth(year, month) {
-    // month es 1-12 (usa UTC para consistencia con el resto del dashboard)
-    return new Date(Date.UTC(year, month, 0)).getUTCDate();
+    // month es 1-12
+    return new Date(year, month, 0).getDate();
 }
 
 function getDaysElapsedInMonth(year, month) {
     const now = new Date();
-    const currentYear = now.getUTCFullYear();
-    const currentMonth = now.getUTCMonth() + 1;
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth() + 1;
     if (year !== currentYear || month !== currentMonth) {
         return getDaysInMonth(year, month);
     }
-    return now.getUTCDate();
+    return now.getDate();
 }
 
 function calculateDailyAverage(entries, month) {
@@ -236,7 +249,7 @@ function calculateDailyAverage(entries, month) {
     if (!month) return 0;
     const [year, mon] = month.split('-').map(Number);
     const expenses = entries
-        .filter(e => e.tipo !== 'income' && e.fecha.startsWith(month))
+        .filter(e => e.tipo === 'expense' && e.fecha.startsWith(month))
         .reduce((acc, e) => acc + e.monto, 0);
     const days = getDaysElapsedInMonth(year, mon);
     return days > 0 ? expenses / days : 0;
@@ -255,18 +268,18 @@ function calculateComparison(entries, month) {
     if (!month) return { delta: 0, percent: 0, prevMonth: null };
     const [year, mon] = month.split('-').map(Number);
 
-    // Mes anterior (usa UTC para consistencia)
-    const prevDate = new Date(Date.UTC(year, mon - 2, 1));
-    const prevYear = prevDate.getUTCFullYear();
-    const prevMonth = String(prevDate.getUTCMonth() + 1).padStart(2, '0');
+    // Mes anterior
+    const prevDate = new Date(year, mon - 2, 1);
+    const prevYear = prevDate.getFullYear();
+    const prevMonth = String(prevDate.getMonth() + 1).padStart(2, '0');
     const prevKey = `${prevYear}-${prevMonth}`;
 
     const currentExpenses = entries
-        .filter(e => e.tipo !== 'income' && e.fecha.startsWith(month))
+        .filter(e => e.tipo === 'expense' && e.fecha.startsWith(month))
         .reduce((acc, e) => acc + e.monto, 0);
 
     const prevExpenses = entries
-        .filter(e => e.tipo !== 'income' && e.fecha.startsWith(prevKey))
+        .filter(e => e.tipo === 'expense' && e.fecha.startsWith(prevKey))
         .reduce((acc, e) => acc + e.monto, 0);
 
     const delta = currentExpenses - prevExpenses;
@@ -285,7 +298,7 @@ function calculateBudgetProgress(entries, budgets, month) {
     }
 
     const gastosPorCategoria = entries
-        .filter(e => e.tipo !== 'income' && e.fecha.startsWith(month))
+        .filter(e => e.tipo === 'expense' && e.fecha.startsWith(month))
         .reduce((acc, e) => {
             acc[e.categoria] = (acc[e.categoria] || 0) + e.monto;
             return acc;
@@ -307,8 +320,8 @@ function calculateBudgetProgress(entries, budgets, month) {
 function calculateMonthlyTrend(entries, months = 12) {
     // Devuelve array de { mes: 'YYYY-MM', gastos, ingresos, balance } para los últimos N meses
     const now = new Date();
-    const currentYear = now.getUTCFullYear();
-    const currentMonth = now.getUTCMonth() + 1;
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth() + 1;
 
     const result = [];
     for (let i = months - 1; i >= 0; i--) {
@@ -321,7 +334,7 @@ function calculateMonthlyTrend(entries, months = 12) {
 
         const monthEntries = entries.filter(e => e.fecha.startsWith(key));
         const gastos = monthEntries
-            .filter(e => e.tipo !== 'income')
+            .filter(e => e.tipo === 'expense')
             .reduce((acc, e) => acc + e.monto, 0);
         const ingresos = monthEntries
             .filter(e => e.tipo === 'income')
@@ -346,9 +359,9 @@ function generateRecurringEntries(recurring, entries, month) {
 
     const [year, mon] = month.split('-').map(Number);
     const now = new Date();
-    const currentYear = now.getUTCFullYear();
-    const currentMonth = now.getUTCMonth() + 1;
-    const today = now.getUTCDate();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth() + 1;
+    const today = now.getDate();
 
     // Solo generar para mes actual o pasado
     const isCurrentMonth = (year === currentYear && mon === currentMonth);
