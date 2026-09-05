@@ -86,10 +86,13 @@ ollama serve
 ## Tests
 
 ```bash
-npx vitest run
+npx vitest run        # unit + storage layer (jsdom + fake-indexeddb)
+npx playwright test   # E2E smoke (Chromium): setup de passphrase, alta de gasto y persistencia
 ```
 
-235 tests covering pure functions in the `src/` layer (finance, storage, crypto, boot, ai-providers) and storage logic.
+- **299 unit tests** covering pure functions in the `src/` layer (finance, storage, crypto, boot, ai-providers) and storage logic.
+- **1 E2E smoke test** (`e2e/smoke.spec.js`): first-run passphrase setup → add an expense → reload and unlock → verify persistence (IndexedDB + encryption).
+- CI runs both suites (`test.yml`); GitHub Pages deploy lives in `pages.yml`.
 
 ## Design Decisions
 
