@@ -273,6 +273,7 @@ function setupAiSettingsModal() {
     const btnTest = document.getElementById('btnTestConnection');
     const btnSave = document.getElementById('btnSaveAiSettings');
     const btnToggleKey = document.getElementById('btnToggleApiKey');
+    const privacyNotice = document.getElementById('aiPrivacyNotice');
 
     // Default values per provider
     const PROVIDER_DEFAULTS = {
@@ -287,6 +288,14 @@ function setupAiSettingsModal() {
         const isLocal = provider === 'local';
         const needsKey = provider !== 'local';
         const hasModelsEndpoint = provider === 'local' || provider === 'openai';
+
+        // Aviso de privacidad: solo se oculta si el proveedor es local Y la URL
+        // apunta a localhost/127.0.0.1. Cualquier otra combinación envía datos afuera.
+        const baseUrl = (baseUrlInput.value || '').trim();
+        const isLocalUrl = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/i.test(baseUrl);
+        if (privacyNotice) {
+            privacyNotice.classList.toggle('d-none', isLocal && isLocalUrl);
+        }
 
         baseUrlGroup.classList.toggle('d-none', !isLocal);
         apiKeyGroup.classList.toggle('d-none', !needsKey);

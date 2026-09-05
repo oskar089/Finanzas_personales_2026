@@ -579,3 +579,63 @@ describe('testConnection()', () => {
         expect(url).toContain('localhost:11434');
     });
 });
+
+// -------------------------------------------------------------------
+// fetchWithTimeout() — cancela peticiones colgadas
+// -------------------------------------------------------------------
+describe('fetchWithTimeout()', () => {
+    it('resuelve normalmente si el proveedor responde a tiempo', async () => {
+        const fetchFn = mockFetch({ choices: [{ message: { content: 'ok' } }] });
+
+        const res = await aiProviders.fetchWithTimeout(
+            'http://localhost:11434/v1/chat/completions',
+            { method: 'POST' },
+            100
+        );
+
+        expect(res.ok).toBe(true);
+        expect(fetchFn).toHaveBeenCalledOnce();
+    });
+
+    it('aborta y rechaza si el proveedor no responde dentro del timeout', async () => {
+        vi.useFakeTimers();
+        const originalFetch = globalThis.fetch;
+        globalThis.fetch = (_url, opts) => new Promise((_resolve, reject) => {
+            opts.signal.addEventListener('abort', () =>
+                reject(new DOMException('Aborted', 'AbortError'))
+            );
+        });
+        try {
+            const promise = aiProviders.fetchWithTimeout('http://proveedor-colgado', {}, 50);
+            const assertion = promise.then(() => 'resolved', (err) => `rejected: ${err.message}`);
+            await vi.advanceTimersByTimeAsync(100);
+            const outcome = await assertion;
+            expect(outcome).toContain('tardó más de');
+        } finally {
+            globalThis.fetch = originalFetch;
+            vi.useRealTimers();
+        }
+    });
+
+    it('pasa un AbortSignal al fetch options', async () => {
+        const fetchFn = mockFetch({ choices: [{ message: { content: 'ok' } }] });
+
+        await aiProviders.fetchWithTimeout('http://x', {}, 100);
+
+        const [, opts] = fetchFn.mock.calls[0];
+        expect(opts.signal).toBeInstanceOf(AbortSignal);
+    });
+
+    it('openaiCompatibleFetch usa el timeout del helper', async () => {
+        const fetchFn = mockFetch({ choices: [{ message: { content: 'ok' } }] });
+
+        await aiProviders.openaiCompatibleFetch(
+            defaultSettings,
+            [{ role: 'user', content: 'Hi' }],
+            { timeout: 100 }
+        );
+
+        const [, opts] = fetchFn.mock.calls[0];
+        expect(opts.signal).toBeInstanceOf(AbortSignal);
+    });
+});

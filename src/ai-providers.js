@@ -68,10 +68,31 @@ async function getActiveProvider() {
     return { ...DEFAULT_SETTINGS, ...settings };
 }
 
+// --- Timeout -----------------------------------------------------------
+
+const DEFAULT_TIMEOUT_MS = 15000;
+
+// Fetch con AbortController: si el proveedor no responde en `timeoutMs`,
+// aborta la petición y rechaza con un error accionable (evita cuelgues de minutos).
+async function fetchWithTimeout(url, options = {}, timeoutMs = DEFAULT_TIMEOUT_MS) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+        return await fetch(url, { ...options, signal: controller.signal });
+    } catch (err) {
+        if (controller.signal.aborted) {
+            throw new Error(`La petición a la IA tardó más de ${Math.round(timeoutMs / 1000)}s y se canceló.`);
+        }
+        throw err;
+    } finally {
+        clearTimeout(timeoutId);
+    }
+}
+
 // --- Adapter: OpenAI-compatible (local + openai) -----------------------
 
 async function openaiCompatibleFetch(settings, messages, opts = {}) {
-    const { temperature = 0.3, max_tokens = 500 } = opts;
+    const { temperature = 0.3, max_tokens = 500, timeout = DEFAULT_TIMEOUT_MS } = opts;
     const url = `${settings.baseUrl}/v1/chat/completions`;
     const headers = { 'Content-Type': 'application/json' };
     if (settings.apiKey) {
@@ -86,11 +107,11 @@ async function openaiCompatibleFetch(settings, messages, opts = {}) {
         max_tokens
     };
 
-    const res = await fetch(url, {
+    const res = await fetchWithTimeout(url, {
         method: 'POST',
         headers,
         body: JSON.stringify(body)
-    });
+    }, timeout);
 
     if (!res.ok) {
         throw new Error(`OpenAI-compatible request failed: ${res.status} ${res.statusText}`);
@@ -121,7 +142,7 @@ function geminiTranslateMessages(messages) {
 }
 
 async function geminiFetch(settings, messages, opts = {}) {
-    const { temperature = 0.3, max_tokens = 500 } = opts;
+    const { temperature = 0.3, max_tokens = 500, timeout = DEFAULT_TIMEOUT_MS } = opts;
     const { contents, systemInstruction } = geminiTranslateMessages(messages);
 
     const url = `${settings.baseUrl}/v1beta/models/${settings.model}:generateContent?key=${settings.apiKey}`;
@@ -138,11 +159,11 @@ async function geminiFetch(settings, messages, opts = {}) {
         body.systemInstruction = systemInstruction;
     }
 
-    const res = await fetch(url, {
+    const res = await fetchWithTimeout(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body)
-    });
+    }, timeout);
 
     if (!res.ok) {
         throw new Error(`Gemini request failed: ${res.status} ${res.statusText}`);
@@ -156,7 +177,7 @@ async function geminiFetch(settings, messages, opts = {}) {
 // --- Adapter: Claude ---------------------------------------------------
 
 async function claudeFetch(settings, messages, opts = {}) {
-    const { temperature = 0.3, max_tokens = 500 } = opts;
+    const { temperature = 0.3, max_tokens = 500, timeout = DEFAULT_TIMEOUT_MS } = opts;
 
     let systemPrompt = null;
     const claudeMessages = [];
@@ -186,11 +207,11 @@ async function claudeFetch(settings, messages, opts = {}) {
         body.system = systemPrompt;
     }
 
-    const res = await fetch(`${settings.baseUrl}/v1/messages`, {
+    const res = await fetchWithTimeout(`${settings.baseUrl}/v1/messages`, {
         method: 'POST',
         headers,
         body: JSON.stringify(body)
-    });
+    }, timeout);
 
     if (!res.ok) {
         throw new Error(`Claude request failed: ${res.status} ${res.statusText}`);
@@ -239,7 +260,7 @@ async function discoverModels(settings) {
             headers['Authorization'] = `Bearer ${settings.apiKey}`;
         }
 
-        const res = await fetch(url, { headers });
+        const res = await fetchWithTimeout(url, { headers }, 8000);
         if (!res.ok) return [];
 
         const data = await res.json();
@@ -255,7 +276,7 @@ async function discoverModels(settings) {
 async function testConnection(settings) {
     try {
         const testMessages = [{ role: 'user', content: 'Hi' }];
-        await _dispatchWithSettings(settings, testMessages, { max_tokens: 5 });
+        await _dispatchWithSettings(settings, testMessages, { max_tokens: 5, timeout: 10000 });
         return { ok: true };
     } catch (err) {
         return { ok: false, error: err.message };
@@ -268,6 +289,8 @@ if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
         PROVIDERS,
         DEFAULT_SETTINGS,
+        DEFAULT_TIMEOUT_MS,
+        fetchWithTimeout,
         getActiveProvider,
         chatCompletion,
         openaiCompatibleFetch,
