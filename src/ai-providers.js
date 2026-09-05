@@ -163,7 +163,7 @@ async function geminiFetch(settings, messages, opts = {}) {
     const { temperature = 0.3, max_tokens = 500, timeout = DEFAULT_TIMEOUT_MS } = opts;
     const { contents, systemInstruction } = geminiTranslateMessages(messages);
 
-    const url = `${settings.baseUrl}/v1beta/models/${settings.model}:generateContent?key=${settings.apiKey}`;
+    const url = `${settings.baseUrl}/v1beta/models/${settings.model}:generateContent`;
 
     const body = {
         contents,
@@ -179,7 +179,12 @@ async function geminiFetch(settings, messages, opts = {}) {
 
     const res = await fetchWithTimeout(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+            'Content-Type': 'application/json',
+            // La API key va en el header (x-goog-api-key), no en la URL:
+            // la URL puede quedar en logs/proxies/historial.
+            'x-goog-api-key': settings.apiKey
+        },
         body: JSON.stringify(body),
         signal: opts.signal
     }, timeout);

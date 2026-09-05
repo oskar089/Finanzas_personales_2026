@@ -80,6 +80,17 @@ function isObjectRecord(value) {
     return !!value && typeof value === 'object' && !Array.isArray(value);
 }
 
+// Valida el schema PLANO (no-envelope) de un store antes de re-encriptarlo
+// durante una migración: las claves LS con JSON válido pero estructura
+// incorrecta son corrupción, no datos migrables.
+function assertPlainSchemaValid(aad, parsed) {
+    if (aad === STORE_NAME || aad === RECURRING_STORE || aad === CUSTOM_CATEGORIES_STORE) {
+        if (!Array.isArray(parsed)) throw new StorageReadError();
+        return;
+    }
+    if (!isObjectRecord(parsed)) throw new StorageReadError();
+}
+
 function assertKeyReady() {
     if (!fpCrypto || !fpCrypto.isEncryptionReady()) {
         throw new Error('Cifrado no inicializado: llamá storage.initKey(passphrase) primero.');
@@ -358,7 +369,10 @@ async function lsLoad() {
         if (!Array.isArray(plain)) throw new EncryptedStorageReadError(STORE_NAME);
         return plain;
     }
-    return Array.isArray(parsed) ? parsed : [];
+    // JSON válido pero estructuralmente corrupto para este store: la clave EXISTE
+    // con datos que no son lo que esperamos. No es ausencia — es corrupción.
+    if (!Array.isArray(parsed)) throw new StorageReadError();
+    return parsed;
 }
 
 async function lsSave(entries, { fallbackAuthority = false } = {}) {
@@ -391,7 +405,8 @@ async function lsLoadBudgets() {
         if (!isObjectRecord(plain)) throw new EncryptedStorageReadError(BUDGETS_STORE);
         return plain;
     }
-    return isObjectRecord(parsed) ? parsed : {};
+    if (!isObjectRecord(parsed)) throw new StorageReadError();
+    return parsed;
 }
 
 async function lsSaveBudgets(budgets, { fallbackAuthority = false } = {}) {
@@ -416,7 +431,8 @@ async function lsLoadRecurring() {
         if (!Array.isArray(plain)) throw new EncryptedStorageReadError(RECURRING_STORE);
         return plain;
     }
-    return Array.isArray(parsed) ? parsed : [];
+    if (!Array.isArray(parsed)) throw new StorageReadError();
+    return parsed;
 }
 
 async function lsSaveRecurring(recurring, { fallbackAuthority = false } = {}) {
@@ -441,7 +457,8 @@ async function lsLoadCustomCategories() {
         if (!Array.isArray(plain)) throw new EncryptedStorageReadError(CUSTOM_CATEGORIES_STORE);
         return plain;
     }
-    return Array.isArray(parsed) ? parsed : [];
+    if (!Array.isArray(parsed)) throw new StorageReadError();
+    return parsed;
 }
 
 async function lsSaveCustomCategories(categories, { fallbackAuthority = false } = {}) {
@@ -467,7 +484,8 @@ async function lsLoadAiSettings() {
         if (!isObjectRecord(plain)) throw new EncryptedStorageReadError(AI_SETTINGS_STORE);
         return plain;
     }
-    return isObjectRecord(parsed) ? parsed : null;
+    if (!isObjectRecord(parsed)) throw new StorageReadError();
+    return parsed;
 }
 
 async function lsSaveAiSettings(settings, { fallbackAuthority = false } = {}) {
@@ -493,7 +511,8 @@ async function lsLoadSettings() {
         if (!isObjectRecord(plain)) throw new EncryptedStorageReadError(SETTINGS_STORE);
         return plain;
     }
-    return isObjectRecord(parsed) ? parsed : null;
+    if (!isObjectRecord(parsed)) throw new StorageReadError();
+    return parsed;
 }
 
 async function lsSaveSettings(settings, { fallbackAuthority = false } = {}) {
@@ -695,8 +714,13 @@ async function migrateLsKeysWhenIdbDown() {
         } catch {
             continue;
         }
-        if (isFallbackDeletion(parsed)) continue;
+if (isFallbackDeletion(parsed)) continue;
         if (isEnvelope(parsed)) continue; // ya migrado
+
+        // Corrupción estructural: la clave EXISTE con JSON válido pero schema
+        // incorrecto para su store. No migrar ni re-encriptar basura: eso la
+        // persistiría enmascarada como envelope y luego fallaría confuso al leer.
+        assertPlainSchemaValid(aad, parsed);
 
         // Cifrar in-place con read-back verify
         assertKeyReady();
@@ -735,14 +759,17 @@ async function idbPutCryptoMeta(meta) {
 }
 
 function lsLoadCryptoMeta() {
+    const raw = localStorage.getItem(LS_CRYPTO_META_KEY);
+    if (!raw) return null;
+    let parsed;
     try {
-        const raw = localStorage.getItem(LS_CRYPTO_META_KEY);
-        if (!raw) return null;
-        const parsed = JSON.parse(raw);
-        return parsed && parsed.id === 'meta' ? parsed : null;
+        parsed = JSON.parse(raw);
     } catch {
-        return null;
+        // Clave EXISTE pero es ilegible: corrupción ≠ ausencia.
+        throw new StorageReadError();
     }
+    if (!isObjectRecord(parsed) || parsed.id !== 'meta') throw new StorageReadError();
+    return parsed;
 }
 
 function lsSaveCryptoMeta(meta) {

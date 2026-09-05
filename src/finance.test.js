@@ -835,6 +835,18 @@ describe('parseEntryFromRow()', () => {
         expect(result.errors).toBeDefined();
     });
 
+    it('rechaza fechas imposibles de calendario en edición inline (2026-02-31)', () => {
+        const result = finance.parseEntryFromRow({
+            fecha: '2026-02-31',
+            tipo: 'expense',
+            categoria: 'Comida',
+            descripcion: 'Test',
+            monto: '10'
+        });
+        expect(result.errors).toBeDefined();
+        expect(result.errors.some(e => /fecha/i.test(e))).toBe(true);
+    });
+
     it('devuelve error si monto es cero', () => {
         const result = finance.parseEntryFromRow({
             fecha: '2026-08-15',

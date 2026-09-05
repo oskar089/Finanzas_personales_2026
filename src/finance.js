@@ -427,7 +427,7 @@ function parseEntryFromRow(values) {
     const descripcion = (values.descripcion || '').trim();
     const monto = values.monto;
 
-    if (!fecha || !/^\d{4}-\d{2}-\d{2}$/.test(fecha) || isNaN(Date.parse(fecha))) {
+    if (!isValidDateString(fecha)) {
         errors.push('Fecha no válida.');
     }
     if (!tipo || (tipo !== 'expense' && tipo !== 'income' && tipo !== 'savings')) {
@@ -465,6 +465,7 @@ if (typeof module !== 'undefined' && module.exports) {
         calculateBalance,
         filterEntries,
         validateEntry,
+        isValidDateString,
         parseAmount,
         getDaysInMonth,
         getDaysElapsedInMonth,
@@ -499,6 +500,7 @@ if (typeof window !== 'undefined') {
     window.calculateBalance = calculateBalance;
     window.filterEntries = filterEntries;
     window.validateEntry = validateEntry;
+    window.isValidDateString = isValidDateString;
     window.parseAmount = parseAmount;
     window.getDaysInMonth = getDaysInMonth;
     window.getDaysElapsedInMonth = getDaysElapsedInMonth;

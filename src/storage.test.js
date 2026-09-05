@@ -1594,4 +1594,40 @@ describe('storage.* fail-closed en lectura (StorageReadError)', () => {
             localStorage.removeItem('finanzas:gastos:v1');
         }
     });
+
+    it('JSON válido pero schema incorrecto en entries: la clave EXISTE → StorageReadError', async () => {
+        localStorage.setItem('finanzas:gastos:v1', JSON.stringify({ esto: 'no es un array' }));
+        const original = globalThis.indexedDB;
+        globalThis.indexedDB = undefined;
+        try {
+            await expect(storage.load()).rejects.toBeInstanceOf(storage.StorageReadError);
+        } finally {
+            globalThis.indexedDB = original;
+            localStorage.removeItem('finanzas:gastos:v1');
+        }
+    });
+
+    it('JSON válido pero schema incorrecto en budgets → StorageReadError', async () => {
+        localStorage.setItem('finanzas:budgets:v1', JSON.stringify([1, 2, 3]));
+        const original = globalThis.indexedDB;
+        globalThis.indexedDB = undefined;
+        try {
+            await expect(storage.loadBudgets()).rejects.toBeInstanceOf(storage.StorageReadError);
+        } finally {
+            globalThis.indexedDB = original;
+            localStorage.removeItem('finanzas:budgets:v1');
+        }
+    });
+
+    it('crypto meta corrupta (clave existe, JSON inválido) → StorageReadError', async () => {
+        localStorage.setItem('finanzas:crypto-meta:v1', '{not-json');
+        const original = globalThis.indexedDB;
+        globalThis.indexedDB = undefined;
+        try {
+            await expect(storage.hasEncryptionKey()).rejects.toBeInstanceOf(storage.StorageReadError);
+        } finally {
+            globalThis.indexedDB = original;
+            localStorage.removeItem('finanzas:crypto-meta:v1');
+        }
+    });
 });

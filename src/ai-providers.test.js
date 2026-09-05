@@ -307,7 +307,10 @@ describe('geminiFetch()', () => {
         expect(fetchFn).toHaveBeenCalledOnce();
         const [url, opts] = fetchFn.mock.calls[0];
         expect(url).toContain('generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent');
-        expect(url).toContain('key=gemini-key');
+        // La API key viaja en el header (x-goog-api-key), nunca en la URL
+        // (la URL puede quedar en logs/proxies).
+        expect(url).not.toContain('key=');
+        expect(opts.headers['x-goog-api-key']).toBe('gemini-key');
 
         const body = JSON.parse(opts.body);
         expect(body.contents).toBeDefined();

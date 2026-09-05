@@ -1052,7 +1052,7 @@ function renderTable() {
     const sorted = [...filtered].sort((a, b) => b.fecha.localeCompare(a.fecha));
 
     const now = new Date();
-    const currentMonth = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
+    const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
     const budgetProgress = calculateBudgetProgress(entries, budgets, currentMonth);
     const budgetMap = Object.fromEntries(budgetProgress.map(p => [p.categoria, p]));
 
@@ -1157,7 +1157,7 @@ let chartIncome = null;
 
 function renderCharts() {
     const chartEmpty = document.getElementById('chartEmpty');
-    const hasExpenses = entries.some(e => e.tipo !== 'income');
+    const hasExpenses = entries.some(e => e.tipo === 'expense');
     const hasIncome = entries.some(e => e.tipo === 'income');
 
     if (entries.length === 0) {
@@ -1265,10 +1265,10 @@ function toggleDarkMode() {
 
 function renderDashboard() {
     const now = new Date();
-    const year = now.getUTCFullYear();
-    const month = now.getUTCMonth() + 1;
+    const year = now.getFullYear();
+    const month = now.getMonth() + 1;
     const currentMonth = `${year}-${String(month).padStart(2, '0')}`;
-    const daysLeft = getDaysInMonth(year, month) - now.getUTCDate();
+    const daysLeft = getDaysInMonth(year, month) - now.getDate();
 
     const avg = calculateDailyAverage(entries, currentMonth);
     const projection = calculateProjection(entries, currentMonth);
@@ -1329,7 +1329,7 @@ async function renderRecommendations() {
 
     // Calcular datos financieros del mes actual
     const now = new Date();
-    const currentMonth = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
+    const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 
     const monthEntries = entries.filter(e => e.fecha.startsWith(currentMonth));
     const { totalIncome, totalExpenses, balance } = calculateBalance(monthEntries);
@@ -1339,7 +1339,7 @@ async function renderRecommendations() {
 
     // Top 5 categorías de gasto (con subcategorías)
     const expensesByCategory = monthEntries
-        .filter(e => e.tipo !== 'income')
+        .filter(e => e.tipo === 'expense')
         .reduce((acc, e) => {
             acc[e.categoria] = (acc[e.categoria] || { total: 0, subs: {} });
             acc[e.categoria].total += e.monto;
@@ -1539,7 +1539,7 @@ function renderBudgets() {
     const container = document.getElementById('budgetsContainer');
     const emptyEl = document.getElementById('budgetsEmpty');
     const now = new Date();
-    const currentMonth = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
+    const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 
     const progress = calculateBudgetProgress(entries, budgets, currentMonth);
 
@@ -1631,7 +1631,7 @@ async function loadRecurring() {
 // Verificar y generar recurrentes para el mes actual
 async function checkAndGenerateRecurring() {
     const now = new Date();
-    const currentMonth = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
+    const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 
     const toCreate = generateRecurringEntries(recurring, entries, currentMonth);
 
