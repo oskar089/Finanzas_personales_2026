@@ -1363,9 +1363,17 @@ function commitBackupPackage(db, bundle) {
 }
 
 function mirrorImportedBackup(bundle) {
-    localStorage.setItem(LS_AI_SETTINGS_KEY, JSON.stringify(bundle.stores[AI_SETTINGS_STORE][0]));
-    localStorage.setItem(LS_SETTINGS_KEY, JSON.stringify(bundle.stores[SETTINGS_STORE][0]));
-    localStorage.setItem(LS_CRYPTO_META_KEY, JSON.stringify(bundle.cryptoMeta));
+    // Best-effort: el espejo LS es solo conveniencia; IDB es la autoridad y el
+    // backup ya se comprometió en commitBackupPackage. Un fallo de mirror
+    // (quota/privacidad) no debe reportar un import como fallido cuando el
+    // backup SÍ se aplicó: eso dejaría IDB nuevo + UI diciendo "falló".
+    try {
+        localStorage.setItem(LS_AI_SETTINGS_KEY, JSON.stringify(bundle.stores[AI_SETTINGS_STORE][0]));
+        localStorage.setItem(LS_SETTINGS_KEY, JSON.stringify(bundle.stores[SETTINGS_STORE][0]));
+        localStorage.setItem(LS_CRYPTO_META_KEY, JSON.stringify(bundle.cryptoMeta));
+    } catch (err) {
+        console.warn('No se pudo espejar el backup en localStorage; IDB quedó aplicado.', err);
+    }
 }
 
 async function exportAll() {

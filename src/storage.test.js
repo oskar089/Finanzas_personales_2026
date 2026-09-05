@@ -1529,6 +1529,26 @@ describe('storage secure complete backup packages', () => {
         }
         expect(await rawBackupSnapshot()).toEqual(before);
     });
+
+    it('aplica el backup a IDB aun si el espejo LS falla (best-effort)', async () => {
+        await seedCompleteBackupState('source');
+        const bundle = await storage.exportAll();
+        await seedCompleteBackupState('destination');
+
+        const setSpy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+            throw new DOMException('QuotaExceededError', 'QuotaExceededError');
+        });
+
+        try {
+            const result = await storage.importAll(bundle, TEST_PASSPHRASE);
+            expect(result).toEqual({ ok: true, errors: [] });
+        } finally {
+            setSpy.mockRestore();
+        }
+
+        // IDB quedó aplicado con el backup source pese al mirror LS fallido
+        expect((await storage.loadRecurring())[0].nombre).toMatch(/source/);
+    });
 });
 
 // --- FU 3.9 FAIL-CLOSED: fallos inesperados de lectura bloquean (no arrancar vacío) ---
