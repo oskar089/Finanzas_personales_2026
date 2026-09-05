@@ -374,12 +374,19 @@ function generateRecurringEntries(recurring, entries, month) {
 
     recurring.forEach(r => {
         if (!r.activo) return;
-        if (r.diaMes < 1 || r.diaMes > 28) return; // solo 1-28 para evitar problemas fin de mes
+        if (r.diaMes < 1 || r.diaMes > 31) return; // día del mes imposible como dato
 
         // Verificar fecha inicio
         const [startYear, startMon] = r.fechaInicio.split('-').map(Number);
         if (year < startYear || (year === startYear && mon < startMon)) {
             return; // aún no empezó
+        }
+
+        // El día debe EXISTIR en el mes objetivo: 29/30/31 solo se generan en
+        // meses que los tienen (enero 31 sí, febrero 31 no). El recurrente
+        // sigue vivo para los meses donde el día sí existe.
+        if (r.diaMes > getDaysInMonth(year, mon)) {
+            return;
         }
 
         // En el MES ACTUAL, no generar si el día del recurrente aún no llegó:

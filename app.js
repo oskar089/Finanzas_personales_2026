@@ -1718,8 +1718,8 @@ function setupRecurringModal() {
                         <input type="text" class="form-control rec-descripcion" maxlength="100" required placeholder="Ej: Alquiler, Netflix, Sueldo">
                     </div>
                     <div class="col-md-6">
-                        <label class="form-label">Día del mes (1-28)</label>
-                        <input type="number" class="form-control rec-diaMes" min="1" max="28" value="1" required>
+                        <label class="form-label">Día del mes (1-31)</label>
+                        <input type="number" class="form-control rec-diaMes" min="1" max="31" value="1" required>
                     </div>
                     <div class="col-md-6">
                         <label class="form-label">Fecha inicio</label>
@@ -1745,8 +1745,8 @@ function setupRecurringModal() {
                 toast.showWarning('Completá todos los campos.');
                 return;
             }
-            if (diaMes < 1 || diaMes > 28) {
-                toast.showWarning('El día debe ser entre 1 y 28.');
+            if (diaMes < 1 || diaMes > 31) {
+                toast.showWarning('El día debe ser entre 1 y 31.');
                 return;
             }
 

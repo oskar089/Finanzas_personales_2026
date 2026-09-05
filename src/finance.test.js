@@ -751,12 +751,36 @@ describe('generateRecurringEntries()', () => {
         expect(result).toHaveLength(0);
     });
 
-    it('solo genera hasta día 28', () => {
-        const recurring29 = [
-            { id: 'r6', tipo: 'expense', monto: 10, categoria: 'Test', descripcion: 'Dia29', diaMes: 29, fechaInicio: '2026-01', activo: true }
+    it('genera día 31 en enero (mes que lo tiene) y no en febrero (28 días)', () => {
+        const recurring31 = [
+            { id: 'r6', tipo: 'expense', monto: 10, categoria: 'Test', descripcion: 'Dia31', diaMes: 31, fechaInicio: '2026-01', activo: true }
         ];
-        const result = finance.generateRecurringEntries(recurring29, entries, currentMonth);
-        expect(result).toHaveLength(0);
+        // Enero 2026 tiene 31 días → el 31 existe → genera
+        const janResult = finance.generateRecurringEntries(recurring31, [], '2026-01');
+        expect(janResult.some(r => r.descripcion === 'Dia31' && r.fecha === '2026-01-31')).toBe(true);
+        // Febrero 2026 tiene 28 días → el 31 no existe → ese mes se omite
+        const febResult = finance.generateRecurringEntries(recurring31, [], '2026-02');
+        expect(febResult).toHaveLength(0);
+    });
+
+    it('genera día 29 en febrero bisiesto (2024) y no en 2026', () => {
+        const recurring29 = [
+            { id: 'r6b', tipo: 'expense', monto: 10, categoria: 'Test', descripcion: 'Dia29', diaMes: 29, fechaInicio: '2023-01', activo: true }
+        ];
+        const leapResult = finance.generateRecurringEntries(recurring29, [], '2024-02');
+        expect(leapResult.some(r => r.descripcion === 'Dia29' && r.fecha === '2024-02-29')).toBe(true);
+        const nonLeapResult = finance.generateRecurringEntries(recurring29, [], '2026-02');
+        expect(nonLeapResult).toHaveLength(0);
+    });
+
+    it('genera día 30 en abril (30 días) y no en febrero', () => {
+        const recurring30 = [
+            { id: 'r6c', tipo: 'expense', monto: 10, categoria: 'Test', descripcion: 'Dia30', diaMes: 30, fechaInicio: '2026-01', activo: true }
+        ];
+        const aprResult = finance.generateRecurringEntries(recurring30, [], '2026-04');
+        expect(aprResult.some(r => r.descripcion === 'Dia30' && r.fecha === '2026-04-30')).toBe(true);
+        const febResult = finance.generateRecurringEntries(recurring30, [], '2026-02');
+        expect(febResult).toHaveLength(0);
     });
 
     it('no genera en el mes actual si el día del recurrente aún no llegó', () => {
