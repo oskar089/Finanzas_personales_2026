@@ -74,18 +74,35 @@ const DEFAULT_TIMEOUT_MS = 15000;
 
 // Fetch con AbortController: si el proveedor no responde en `timeoutMs`,
 // aborta la petición y rechaza con un error accionable (evita cuelgues de minutos).
+// Si `options.signal` viene seteado (cancelación del usuario), se combina con el
+// timeout interno: el abort externo propaga su propio AbortError, el timeout
+// interno lanza el mensaje amigable.
 async function fetchWithTimeout(url, options = {}, timeoutMs = DEFAULT_TIMEOUT_MS) {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    const external = options.signal;
+    const onExternalAbort = () => controller.abort();
+    if (external) {
+        if (external.aborted) {
+            controller.abort();
+        } else {
+            external.addEventListener('abort', onExternalAbort, { once: true });
+        }
+    }
     try {
         return await fetch(url, { ...options, signal: controller.signal });
     } catch (err) {
+        if (external && external.aborted) {
+            // El usuario canceló: propagar el AbortError original.
+            throw err;
+        }
         if (controller.signal.aborted) {
             throw new Error(`La petición a la IA tardó más de ${Math.round(timeoutMs / 1000)}s y se canceló.`);
         }
         throw err;
     } finally {
         clearTimeout(timeoutId);
+        if (external) external.removeEventListener('abort', onExternalAbort);
     }
 }
 
@@ -110,7 +127,8 @@ async function openaiCompatibleFetch(settings, messages, opts = {}) {
     const res = await fetchWithTimeout(url, {
         method: 'POST',
         headers,
-        body: JSON.stringify(body)
+        body: JSON.stringify(body),
+        signal: opts.signal
     }, timeout);
 
     if (!res.ok) {
@@ -162,7 +180,8 @@ async function geminiFetch(settings, messages, opts = {}) {
     const res = await fetchWithTimeout(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
+        body: JSON.stringify(body),
+        signal: opts.signal
     }, timeout);
 
     if (!res.ok) {
@@ -210,7 +229,8 @@ async function claudeFetch(settings, messages, opts = {}) {
     const res = await fetchWithTimeout(`${settings.baseUrl}/v1/messages`, {
         method: 'POST',
         headers,
-        body: JSON.stringify(body)
+        body: JSON.stringify(body),
+        signal: opts.signal
     }, timeout);
 
     if (!res.ok) {

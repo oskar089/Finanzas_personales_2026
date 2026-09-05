@@ -638,4 +638,65 @@ describe('fetchWithTimeout()', () => {
         const [, opts] = fetchFn.mock.calls[0];
         expect(opts.signal).toBeInstanceOf(AbortSignal);
     });
+
+    it('cancelación del usuario propaga AbortError (no el mensaje de timeout)', async () => {
+        const controller = new AbortController();
+        globalThis.fetch = (_url, opts) => new Promise((_resolve, reject) => {
+            if (opts.signal.aborted) {
+                reject(new DOMException('Aborted', 'AbortError'));
+                return;
+            }
+            opts.signal.addEventListener('abort', () =>
+                reject(new DOMException('Aborted', 'AbortError'))
+            );
+        });
+
+        const promise = aiProviders.fetchWithTimeout('http://proveedor-lento', { signal: controller.signal }, 1000);
+        const assertion = promise.then(() => 'resolved', err => `rejected:${err.name}`);
+        controller.abort();
+        const outcome = await assertion;
+
+        expect(outcome).toBe('rejected:AbortError');
+    });
+
+    it('señal ya abortada rechaza sin esperar el timeout', async () => {
+        const controller = new AbortController();
+        controller.abort();
+        const fetchFn = vi.fn((_url, opts) => new Promise((_resolve, reject) => {
+            if (opts.signal.aborted) reject(new DOMException('Aborted', 'AbortError'));
+        })); 
+        globalThis.fetch = fetchFn;
+
+        const outcome = await aiProviders.fetchWithTimeout('http://x', { signal: controller.signal }, 5000)
+            .then(() => 'resolved', err => `rejected:${err.name}`);
+
+        expect(outcome).toBe('rejected:AbortError');
+        expect(fetchFn).toHaveBeenCalledOnce();
+    });
+
+    it('openaiCompatibleFetch combina la señal del usuario con el timeout', async () => {
+        const controller = new AbortController();
+        let receivedSignal;
+        globalThis.fetch = (_url, opts) => new Promise((_resolve, reject) => {
+            receivedSignal = opts.signal;
+            opts.signal.addEventListener('abort', () =>
+                reject(new DOMException('Aborted', 'AbortError'))
+            );
+        });
+
+        const promise = aiProviders.openaiCompatibleFetch(
+            defaultSettings,
+            [{ role: 'user', content: 'Hi' }],
+            { timeout: 5000, signal: controller.signal }
+        );
+        const assertion = promise.then(() => 'resolved', err => `rejected:${err.name}`);
+
+        // La petición se lanza con un signal combinado (no abortado todavía)
+        expect(receivedSignal).toBeDefined();
+        expect(receivedSignal.aborted).toBe(false);
+
+        // Abortar desde afuera cancela el fetch en vuelo
+        controller.abort();
+        expect(await assertion).toBe('rejected:AbortError');
+    });
 });

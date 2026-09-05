@@ -1304,6 +1304,7 @@ async function renderRecommendations() {
     const resultEl = document.getElementById('recommendationsResult');
     const listEl = document.getElementById('recommendationsList');
     const btn = document.getElementById('btnAnalyzeFinance');
+    const btnCancel = document.getElementById('btnCancelAnalyze');
 
     // Verificar si hay datos
     if (entries.length === 0) {
@@ -1322,6 +1323,9 @@ async function renderRecommendations() {
     document.getElementById('recommendationsLoadingText').textContent =
         `Analizando tus finanzas con ${getActiveModelName()}...`;
     btn.disabled = true;
+    btnCancel.classList.remove('d-none');
+    // La cancelación del usuario aborta la petición en vuelo (ver fetchWithTimeout).
+    analyzeController = new AbortController();
 
     // Calcular datos financieros del mes actual
     const now = new Date();
@@ -1392,7 +1396,7 @@ Respondé en español, formato:
         const response = await aiProviders.chatCompletion([
             { role: 'system', content: 'Sos un asistente financiero personal experto.' },
             { role: 'user', content: prompt }
-        ], { temperature: 0.3, max_tokens: 500 });
+        ], { temperature: 0.3, max_tokens: 500, signal: analyzeController.signal });
 
         const text = response.text;
 
@@ -1419,20 +1423,28 @@ Respondé en español, formato:
         toast.showSuccess('Recomendaciones generadas correctamente.');
     } catch (err) {
         console.error('Error con IA:', err);
-        const msg = err.name === 'AbortError'
-            ? `La IA tardó demasiado (60s). Verificá la conexión al proveedor.`
-            : `No se pudo conectar con la IA. Verificá la configuración del proveedor.`;
+        let msg;
+        if (err && err.name === 'AbortError') {
+            msg = 'Análisis cancelado.';
+        } else if (err && /tardó más de/.test(err.message)) {
+            msg = 'La IA tardó demasiado. Verificá la conexión al proveedor.';
+        } else {
+            msg = 'No se pudo conectar con la IA. Verificá la configuración del proveedor.';
+        }
         toast.showError(msg);
         loadingEl.classList.add('d-none');
         emptyEl.classList.remove('d-none');
     } finally {
         btn.disabled = false;
+        btnCancel.classList.add('d-none');
+        analyzeController = null;
     }
 }
 
 // --- Render: Gráfico de tendencia -----------------------------------
 
 let chartTrend = null;
+let analyzeController = null; // AbortController del análisis en curso (cancelación por usuario)
 
 function renderTrendChart() {
     const canvas = document.getElementById('chartTrend');
@@ -2029,6 +2041,16 @@ async function init() {
     // Recomendaciones financieras
     document.getElementById('btnAnalyzeFinance').addEventListener('click', renderRecommendations);
     document.getElementById('btnReAnalyze').addEventListener('click', renderRecommendations);
+    const btnCancelAnalyze = document.getElementById('btnCancelAnalyze');
+    if (btnCancelAnalyze) {
+        btnCancelAnalyze.addEventListener('click', () => {
+            if (analyzeController) {
+                analyzeController.abort();
+                btnCancelAnalyze.disabled = true;
+                btnCancelAnalyze.textContent = 'Cancelando...';
+            }
+        });
+    }
 
     // Filtros
     document.getElementById('filterType').addEventListener('change', (e) => {
