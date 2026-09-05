@@ -823,15 +823,11 @@ async function clear() {
         return;
     }
 
+    const db = await openDB();
     try {
-        const db = await openDB();
-        try {
-            await idbClear(db);
-        } finally {
-            db.close();
-        }
-    } catch {
-        lsClear();
+        await idbClear(db);
+    } finally {
+        db.close();
     }
 }
 
@@ -977,20 +973,16 @@ async function saveAiSettings(settings) {
             localStorage.removeItem(LS_AI_SETTINGS_KEY);
             return;
         }
+        const db = await openDB();
         try {
-            const db = await openDB();
-            try {
-                const tx = db.transaction(AI_SETTINGS_STORE, 'readwrite');
-                tx.objectStore(AI_SETTINGS_STORE).delete('active');
-                await new Promise((resolve, reject) => {
-                    tx.oncomplete = resolve;
-                    tx.onerror = () => reject(tx.error);
-                });
-            } finally {
-                db.close();
-            }
-        } catch {
-            // ignore
+            const tx = db.transaction(AI_SETTINGS_STORE, 'readwrite');
+            tx.objectStore(AI_SETTINGS_STORE).delete('active');
+            await new Promise((resolve, reject) => {
+                tx.oncomplete = resolve;
+                tx.onerror = () => reject(tx.error);
+            });
+        } finally {
+            db.close();
         }
         localStorage.removeItem(LS_AI_SETTINGS_KEY);
         return;
@@ -1045,20 +1037,16 @@ async function saveCurrencySettings(settings) {
             localStorage.removeItem(LS_SETTINGS_KEY);
             return;
         }
+        const db = await openDB();
         try {
-            const db = await openDB();
-            try {
-                const tx = db.transaction(SETTINGS_STORE, 'readwrite');
-                tx.objectStore(SETTINGS_STORE).delete('active');
-                await new Promise((resolve, reject) => {
-                    tx.oncomplete = resolve;
-                    tx.onerror = () => reject(tx.error);
-                });
-            } finally {
-                db.close();
-            }
-        } catch {
-            // ignore
+            const tx = db.transaction(SETTINGS_STORE, 'readwrite');
+            tx.objectStore(SETTINGS_STORE).delete('active');
+            await new Promise((resolve, reject) => {
+                tx.oncomplete = resolve;
+                tx.onerror = () => reject(tx.error);
+            });
+        } finally {
+            db.close();
         }
         localStorage.removeItem(LS_SETTINGS_KEY);
         return;
@@ -1092,20 +1080,16 @@ async function clearCurrencySettings() {
         return;
     }
 
+    const db = await openDB();
     try {
-        const db = await openDB();
-        try {
-            const tx = db.transaction(SETTINGS_STORE, 'readwrite');
-            tx.objectStore(SETTINGS_STORE).delete('active');
-            await new Promise((resolve, reject) => {
-                tx.oncomplete = resolve;
-                tx.onerror = () => reject(tx.error);
-            });
-        } finally {
-            db.close();
-        }
-    } catch {
-        // ignore
+        const tx = db.transaction(SETTINGS_STORE, 'readwrite');
+        tx.objectStore(SETTINGS_STORE).delete('active');
+        await new Promise((resolve, reject) => {
+            tx.oncomplete = resolve;
+            tx.onerror = () => reject(tx.error);
+        });
+    } finally {
+        db.close();
     }
     localStorage.removeItem(LS_SETTINGS_KEY);
 }

@@ -65,6 +65,28 @@ function abortWritesFor(storeName) {
     });
 }
 
+function abortDeletesFor(storeName) {
+    const originalDelete = IDBObjectStore.prototype.delete;
+    return vi.spyOn(IDBObjectStore.prototype, 'delete').mockImplementation(function (key) {
+        if (this.name === storeName) {
+            this.transaction.abort();
+            throw new DOMException('Injected deletion failure', 'AbortError');
+        }
+        return originalDelete.call(this, key);
+    });
+}
+
+function abortClearsFor(storeName) {
+    const originalClear = IDBObjectStore.prototype.clear;
+    return vi.spyOn(IDBObjectStore.prototype, 'clear').mockImplementation(function () {
+        if (this.name === storeName) {
+            this.transaction.abort();
+            throw new DOMException('Injected deletion failure', 'AbortError');
+        }
+        return originalClear.call(this);
+    });
+}
+
 function abortWritesAfterClearFor(storeName) {
     let clearStarted = false;
     const originalClear = IDBObjectStore.prototype.clear;
@@ -280,6 +302,36 @@ describe('storage.clear()', () => {
     it('no explota si esta vacio', async () => {
         await expect(storage.clear()).resolves.toBeUndefined();
     });
+
+    it('rejects when the entries clear aborts and preserves the localStorage mirror', async () => {
+        await storage.save(sampleEntries);
+        const db = await openRawDb();
+        const priorIdb = await idbGetAllRaw(db, 'entries');
+        const priorLs = JSON.stringify({ preserved: 'entries-mirror' });
+        localStorage.setItem('finanzas:gastos:v1', priorLs);
+        const clearSpy = abortClearsFor('entries');
+
+        try {
+            await expect(storage.clear()).rejects.toThrow('Injected deletion failure');
+        } finally {
+            clearSpy.mockRestore();
+        }
+
+        expect(await idbGetAllRaw(db, 'entries')).toEqual(priorIdb);
+        expect(localStorage.getItem('finanzas:gastos:v1')).toBe(priorLs);
+    });
+
+    it('continues clearing localStorage when IndexedDB is unavailable', async () => {
+        const originalIndexedDB = globalThis.indexedDB;
+        globalThis.indexedDB = undefined;
+        try {
+            await storage.save(sampleEntries);
+            await storage.clear();
+            expect(localStorage.getItem('finanzas:gastos:v1')).toBeNull();
+        } finally {
+            globalThis.indexedDB = originalIndexedDB;
+        }
+    });
 });
 
 // -------------------------------------------------------------------
@@ -454,6 +506,35 @@ describe('storage.saveAiSettings() / loadAiSettings()', () => {
         expect(loaded.apiKey).toBe('sk-test');
         expect(loaded.model).toBe('gpt-4o');
     });
+
+    it('rejects when deleting AI settings fails and preserves the localStorage mirror', async () => {
+        await storage.saveAiSettings(sampleAiSettings);
+        const db = await openRawDb();
+        const priorIdb = await idbGetRaw(db, 'aiSettings', 'active');
+        const priorLs = localStorage.getItem('finanzas:ai-settings:v1');
+        const deleteSpy = abortDeletesFor('aiSettings');
+
+        try {
+            await expect(storage.saveAiSettings(null)).rejects.toThrow('Injected deletion failure');
+        } finally {
+            deleteSpy.mockRestore();
+        }
+
+        expect(await idbGetRaw(db, 'aiSettings', 'active')).toEqual(priorIdb);
+        expect(localStorage.getItem('finanzas:ai-settings:v1')).toBe(priorLs);
+    });
+
+    it('continues clearing AI settings from localStorage when IndexedDB is unavailable', async () => {
+        const originalIndexedDB = globalThis.indexedDB;
+        globalThis.indexedDB = undefined;
+        try {
+            await storage.saveAiSettings(sampleAiSettings);
+            await storage.saveAiSettings(null);
+            expect(localStorage.getItem('finanzas:ai-settings:v1')).toBeNull();
+        } finally {
+            globalThis.indexedDB = originalIndexedDB;
+        }
+    });
 });
 
 // -------------------------------------------------------------------
@@ -546,6 +627,56 @@ describe('storage.saveCurrencySettings() / loadCurrencySettings()', () => {
         const loaded = await storage.loadCurrencySettings();
         expect(loaded.displayCurrency).toBe('USD');
         expect(loaded.rates.USD).toBe(1.1);
+    });
+
+    it('rejects when deleting currency settings through save fails and preserves the localStorage mirror', async () => {
+        await storage.saveCurrencySettings(sampleCurrencySettings);
+        const db = await openRawDb();
+        const priorIdb = await idbGetRaw(db, 'settings', 'active');
+        const priorLs = localStorage.getItem('finanzas:settings:v1');
+        const deleteSpy = abortDeletesFor('settings');
+
+        try {
+            await expect(storage.saveCurrencySettings(null)).rejects.toThrow('Injected deletion failure');
+        } finally {
+            deleteSpy.mockRestore();
+        }
+
+        expect(await idbGetRaw(db, 'settings', 'active')).toEqual(priorIdb);
+        expect(localStorage.getItem('finanzas:settings:v1')).toBe(priorLs);
+    });
+
+    it('rejects when clearCurrencySettings deletion fails and preserves the localStorage mirror', async () => {
+        await storage.saveCurrencySettings(sampleCurrencySettings);
+        const db = await openRawDb();
+        const priorIdb = await idbGetRaw(db, 'settings', 'active');
+        const priorLs = localStorage.getItem('finanzas:settings:v1');
+        const deleteSpy = abortDeletesFor('settings');
+
+        try {
+            await expect(storage.clearCurrencySettings()).rejects.toThrow('Injected deletion failure');
+        } finally {
+            deleteSpy.mockRestore();
+        }
+
+        expect(await idbGetRaw(db, 'settings', 'active')).toEqual(priorIdb);
+        expect(localStorage.getItem('finanzas:settings:v1')).toBe(priorLs);
+    });
+
+    it('continues clearing currency settings from localStorage when IndexedDB is unavailable', async () => {
+        const originalIndexedDB = globalThis.indexedDB;
+        globalThis.indexedDB = undefined;
+        try {
+            await storage.saveCurrencySettings(sampleCurrencySettings);
+            await storage.saveCurrencySettings(null);
+            expect(localStorage.getItem('finanzas:settings:v1')).toBeNull();
+
+            await storage.saveCurrencySettings(sampleCurrencySettings);
+            await storage.clearCurrencySettings();
+            expect(localStorage.getItem('finanzas:settings:v1')).toBeNull();
+        } finally {
+            globalThis.indexedDB = originalIndexedDB;
+        }
     });
 });
 
