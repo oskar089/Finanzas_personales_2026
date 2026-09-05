@@ -20,6 +20,10 @@ build/
 # Test coverage
 coverage/
 
+# Playwright
+test-results/
+playwright-report/
+
 # OpenCode skill registry (se stagea solo en background y corrompe el indice)
 .atl/
 
