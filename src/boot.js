@@ -38,7 +38,13 @@ function errorToInlineMessage(err) {
 }
 
 function shouldBlockOnStorageReadError(err) {
-    return !!err && err.name === 'EncryptedStorageReadError';
+    if (!err) return false;
+    // Fail-closed: cualquier fallo inesperado de lectura (envuelto por storage.js
+    // como StorageReadError) o de migración bloquea el boot. Arrancar vacío y
+    // sobreescribir con el próximo save es la pérdida de datos que se evita.
+    return err.name === 'EncryptedStorageReadError'
+        || err.name === 'StorageReadError'
+        || err.name === 'MigrationVerifyError';
 }
 
 // --- Exports: window.FPBoot + module.exports ------------------------

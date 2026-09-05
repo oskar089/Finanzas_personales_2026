@@ -87,7 +87,12 @@ describe('shouldBlockOnStorageReadError()', () => {
         expect(shouldBlockOnStorageReadError({ name: 'EncryptedStorageReadError' })).toBe(true);
     });
 
-    it('no bloquea por errores ajenos a la lectura cifrada', () => {
+it('no bloquea por errores ajenos a la lectura cifrada', () => {
         expect(shouldBlockOnStorageReadError(new Error('IndexedDB unavailable'))).toBe(false);
+    });
+
+    it('bloquea el boot ante fallos inesperados de lectura (fail-closed)', () => {
+        expect(shouldBlockOnStorageReadError({ name: 'StorageReadError' })).toBe(true);
+        expect(shouldBlockOnStorageReadError({ name: 'MigrationVerifyError' })).toBe(true);
     });
 });

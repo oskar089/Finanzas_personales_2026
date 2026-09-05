@@ -48,6 +48,26 @@ class EncryptedStorageReadError extends Error {
     }
 }
 
+// Fail-closed genérico de LECTURA: se lanza ante cualquier fallo inesperado al
+// leer IDB (no solo cuando el cifrado falla). El boot lo interpreta como
+// bloqueante para nunca arrancar vacío y sobreescribir datos buenos.
+class StorageReadError extends Error {
+    constructor(message) {
+        super(message);
+        this.name = 'StorageReadError';
+    }
+}
+
+function wrapStorageReadError(err) {
+    if (!err) return new StorageReadError('No se pudieron leer los datos guardados.');
+    if (err.name === 'EncryptedStorageReadError'
+        || err.name === 'StorageReadError'
+        || err.name === 'MigrationVerifyError') return err;
+    const wrapped = new StorageReadError('No se pudieron leer los datos guardados.');
+    wrapped.cause = err;
+    return wrapped;
+}
+
 async function decryptEncryptedPayload(store, envelope) {
     try {
         return await fpCrypto.decryptPayload(store, envelope);
@@ -848,6 +868,11 @@ async function load() {
         const entries = await idbGetAll(db);
         // Normalizar: entries sin `tipo` son 'expense' (backward compat)
         return entries.map(e => ({ ...e, tipo: e.tipo || 'expense' }));
+    } catch (err) {
+        // Fail-closed: cualquier fallo inesperado del bloque de lectura
+        // (reconciliación, migración, IDB) bloquea en vez de arrancar vacío.
+        // Los errores del dominio ya-semánticos se re-lanzan tal cual.
+        throw wrapStorageReadError(err);
     } finally {
         db.close(); // cerrar la conexión (los stores migrados ya están persistidos)
     }
@@ -944,8 +969,9 @@ async function loadBudgets() {
             db.close();
         }
     } catch (err) {
+        // Fail-closed: fallos inesperados de lectura bloquean, nunca vacío
         if (err instanceof EncryptedStorageReadError) throw err;
-        return lsLoadBudgets();
+        throw wrapStorageReadError(err);
     }
 }
 
@@ -992,8 +1018,9 @@ async function loadRecurring() {
             db.close();
         }
     } catch (err) {
+        // Fail-closed: fallos inesperados de lectura bloquean, nunca vacío
         if (err instanceof EncryptedStorageReadError) throw err;
-        return lsLoadRecurring();
+        throw wrapStorageReadError(err);
     }
 }
 
@@ -1037,8 +1064,9 @@ async function loadCustomCategories() {
             db.close();
         }
     } catch (err) {
+        // Fail-closed: fallos inesperados de lectura bloquean, nunca vacío
         if (err instanceof EncryptedStorageReadError) throw err;
-        return lsLoadCustomCategories();
+        throw wrapStorageReadError(err);
     }
 }
 
@@ -1081,8 +1109,9 @@ async function loadAiSettings() {
             db.close();
         }
     } catch (err) {
+        // Fail-closed: fallos inesperados de lectura bloquean, nunca vacío
         if (err instanceof EncryptedStorageReadError) throw err;
-        return lsLoadAiSettings();
+        throw wrapStorageReadError(err);
     }
 }
 
@@ -1151,8 +1180,9 @@ async function loadCurrencySettings() {
             db.close();
         }
     } catch (err) {
+        // Fail-closed: fallos inesperados de lectura bloquean, nunca vacío
         if (err instanceof EncryptedStorageReadError) throw err;
-        return lsLoadSettings();
+        throw wrapStorageReadError(err);
     }
 }
 
@@ -1398,7 +1428,7 @@ async function importAll(bundle, passphrase) {
 
 // Soporte tanto para Node.js (vitest) como navegador
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { load, save, clear, loadBudgets, saveBudgets, loadRecurring, saveRecurring, loadCustomCategories, saveCustomCategories, loadAiSettings, saveAiSettings, loadCurrencySettings, saveCurrencySettings, clearCurrencySettings, isIDBAvailable, initKey, changePassphrase, hasEncryptionKey, migrateEncryption, migrateLsKeysWhenIdbDown, MigrationVerifyError, EncryptedStorageReadError, rawGetAll, rawPut, rawClear, exportAll, importAll, MIGRATION_PLAN };
+    module.exports = { load, save, clear, loadBudgets, saveBudgets, loadRecurring, saveRecurring, loadCustomCategories, saveCustomCategories, loadAiSettings, saveAiSettings, loadCurrencySettings, saveCurrencySettings, clearCurrencySettings, isIDBAvailable, initKey, changePassphrase, hasEncryptionKey, migrateEncryption, migrateLsKeysWhenIdbDown, MigrationVerifyError, EncryptedStorageReadError, StorageReadError, rawGetAll, rawPut, rawClear, exportAll, importAll, MIGRATION_PLAN };
 }
 
 if (typeof window !== 'undefined') {

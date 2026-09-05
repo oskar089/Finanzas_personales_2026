@@ -110,6 +110,17 @@ function abortWritesAfterClearFor(storeName) {
     };
 }
 
+function abortReadsFor(storeName) {
+    const originalGetAll = IDBObjectStore.prototype.getAll;
+    return vi.spyOn(IDBObjectStore.prototype, 'getAll').mockImplementation(function () {
+        if (this.name === storeName) {
+            this.transaction.abort();
+            throw new DOMException('Injected read failure', 'AbortError');
+        }
+        return originalGetAll.call(this);
+    });
+}
+
 // Limpiar entre tests (gate primero, luego clear: nunca borrar antes de resolver la clave)
 beforeEach(async () => {
     // initKey es idempotente: la primera llamada deriva y persiste el meta; las
@@ -1032,9 +1043,11 @@ describe('storage: fallback authority reconciliation', () => {
             globalThis.indexedDB = originalIndexedDB;
         }
 
-        const putSpy = abortWritesFor('entries');
+const putSpy = abortWritesFor('entries');
         try {
-            await expect(storage.load()).rejects.toThrow('Injected write failure');
+            // Fail-closed: el fallo inesperado se envuelve en StorageReadError (no
+            // degrada a datos vacíos), y el estado previo (IDB + LS) queda intacto.
+            await expect(storage.load()).rejects.toBeInstanceOf(storage.StorageReadError);
         } finally {
             putSpy.mockRestore();
         }
@@ -1227,8 +1240,8 @@ describe('storage: migración v6→v7 purge-after-verify (DE12)', () => {
         await storage.initKey(TEST_PASSPHRASE);
         const writes = abortWritesAfterClearFor('entries');
 
-        try {
-            await expect(storage.load()).rejects.toThrow('Injected replacement failure');
+try {
+            await expect(storage.load()).rejects.toBeInstanceOf(storage.StorageReadError);
         } finally {
             writes.restore();
         }
@@ -1515,5 +1528,38 @@ describe('storage secure complete backup packages', () => {
             putSpy.mockRestore();
         }
         expect(await rawBackupSnapshot()).toEqual(before);
+    });
+});
+
+// --- FU 3.9 FAIL-CLOSED: fallos inesperados de lectura bloquean (no arrancar vacío) ---
+describe('storage.* fail-closed en lectura (StorageReadError)', () => {
+    it('load() envuelve un fallo de lectura IDB no-AES en StorageReadError', async () => {
+        await storage.save(sampleEntries);
+        const readSpy = abortReadsFor('entries');
+        try {
+            await expect(storage.load()).rejects.toBeInstanceOf(storage.StorageReadError);
+        } finally {
+            readSpy.mockRestore();
+        }
+    });
+
+    it('loadBudgets() envuelve un fallo de lectura IDB no-AES en StorageReadError', async () => {
+        await storage.saveBudgets({ Comida: 300 });
+        const readSpy = abortReadsFor('budgets');
+        try {
+            await expect(storage.loadBudgets()).rejects.toBeInstanceOf(storage.StorageReadError);
+        } finally {
+            readSpy.mockRestore();
+        }
+    });
+
+    it('loadRecurring() envuelve un fallo de lectura IDB no-AES en StorageReadError', async () => {
+        await storage.saveRecurring([{ id: 'r1', nombre: 'Gimnasio', monto: 50, frecuencia: 'monthly' }]);
+        const readSpy = abortReadsFor('recurring');
+        try {
+            await expect(storage.loadRecurring()).rejects.toBeInstanceOf(storage.StorageReadError);
+        } finally {
+            readSpy.mockRestore();
+        }
     });
 });
