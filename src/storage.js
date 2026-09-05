@@ -23,6 +23,9 @@ const LS_CUSTOM_CATEGORIES_KEY = 'finanzas:custom-categories:v1';
 const LS_AI_SETTINGS_KEY = 'finanzas:ai-settings:v1';
 const LS_SETTINGS_KEY = 'finanzas:settings:v1';
 const LS_MIGRATED_KEY = 'finanzas:migrated';
+const FALLBACK_AUTHORITY_FIELD = '__fallbackAuthority';
+const FALLBACK_AUTHORITY_VERSION = 1;
+const FALLBACK_DELETION_FIELD = '__fallbackDeletion';
 
 // crypto.js carga ANTES que storage.js en index.html (contracto de orden).
 // En tests (Node) resolvemos ambos módulos vía require.
@@ -327,6 +330,7 @@ async function lsLoad() {
     } catch {
         return [];
     }
+    if (isFallbackDeletion(parsed)) return [];
     if (isEnvelope(parsed)) {
         const plain = await decryptEncryptedPayload(STORE_NAME, parsed);
         if (!Array.isArray(plain)) throw new EncryptedStorageReadError(STORE_NAME);
@@ -335,13 +339,18 @@ async function lsLoad() {
     return Array.isArray(parsed) ? parsed : [];
 }
 
-async function lsSave(entries) {
+async function lsSave(entries, { fallbackAuthority = false } = {}) {
     assertKeyReady();
     const env = await fpCrypto.encryptPayload(STORE_NAME, entries);
-    localStorage.setItem(LS_KEY, JSON.stringify(envelopeRecord(STORE_NAME, env)));
+    const record = envelopeRecord(STORE_NAME, env);
+    localStorage.setItem(LS_KEY, JSON.stringify(fallbackAuthority ? markFallbackAuthority(record) : record));
 }
 
-function lsClear() {
+function lsClear({ fallbackAuthority = false } = {}) {
+    if (fallbackAuthority) {
+        localStorage.setItem(LS_KEY, JSON.stringify(fallbackDeletionRecord()));
+        return;
+    }
     localStorage.removeItem(LS_KEY);
 }
 
@@ -354,6 +363,7 @@ async function lsLoadBudgets() {
     } catch {
         return {};
     }
+    if (isFallbackDeletion(parsed)) return {};
     if (isEnvelope(parsed)) {
         const plain = await decryptEncryptedPayload(BUDGETS_STORE, parsed);
         if (!isObjectRecord(plain)) throw new EncryptedStorageReadError(BUDGETS_STORE);
@@ -362,10 +372,11 @@ async function lsLoadBudgets() {
     return isObjectRecord(parsed) ? parsed : {};
 }
 
-async function lsSaveBudgets(budgets) {
+async function lsSaveBudgets(budgets, { fallbackAuthority = false } = {}) {
     assertKeyReady();
     const env = await fpCrypto.encryptPayload(BUDGETS_STORE, budgets);
-    localStorage.setItem(LS_BUDGETS_KEY, JSON.stringify(envelopeRecord(BUDGETS_STORE, env)));
+    const record = envelopeRecord(BUDGETS_STORE, env);
+    localStorage.setItem(LS_BUDGETS_KEY, JSON.stringify(fallbackAuthority ? markFallbackAuthority(record) : record));
 }
 
 async function lsLoadRecurring() {
@@ -377,6 +388,7 @@ async function lsLoadRecurring() {
     } catch {
         return [];
     }
+    if (isFallbackDeletion(parsed)) return [];
     if (isEnvelope(parsed)) {
         const plain = await decryptEncryptedPayload(RECURRING_STORE, parsed);
         if (!Array.isArray(plain)) throw new EncryptedStorageReadError(RECURRING_STORE);
@@ -385,10 +397,11 @@ async function lsLoadRecurring() {
     return Array.isArray(parsed) ? parsed : [];
 }
 
-async function lsSaveRecurring(recurring) {
+async function lsSaveRecurring(recurring, { fallbackAuthority = false } = {}) {
     assertKeyReady();
     const env = await fpCrypto.encryptPayload(RECURRING_STORE, recurring);
-    localStorage.setItem(LS_RECURRING_KEY, JSON.stringify(envelopeRecord(RECURRING_STORE, env)));
+    const record = envelopeRecord(RECURRING_STORE, env);
+    localStorage.setItem(LS_RECURRING_KEY, JSON.stringify(fallbackAuthority ? markFallbackAuthority(record) : record));
 }
 
 async function lsLoadCustomCategories() {
@@ -400,6 +413,7 @@ async function lsLoadCustomCategories() {
     } catch {
         return [];
     }
+    if (isFallbackDeletion(parsed)) return [];
     if (isEnvelope(parsed)) {
         const plain = await decryptEncryptedPayload(CUSTOM_CATEGORIES_STORE, parsed);
         if (!Array.isArray(plain)) throw new EncryptedStorageReadError(CUSTOM_CATEGORIES_STORE);
@@ -408,10 +422,11 @@ async function lsLoadCustomCategories() {
     return Array.isArray(parsed) ? parsed : [];
 }
 
-async function lsSaveCustomCategories(categories) {
+async function lsSaveCustomCategories(categories, { fallbackAuthority = false } = {}) {
     assertKeyReady();
     const env = await fpCrypto.encryptPayload(CUSTOM_CATEGORIES_STORE, categories);
-    localStorage.setItem(LS_CUSTOM_CATEGORIES_KEY, JSON.stringify(envelopeRecord(CUSTOM_CATEGORIES_STORE, env)));
+    const record = envelopeRecord(CUSTOM_CATEGORIES_STORE, env);
+    localStorage.setItem(LS_CUSTOM_CATEGORIES_KEY, JSON.stringify(fallbackAuthority ? markFallbackAuthority(record) : record));
 }
 
 async function lsLoadAiSettings() {
@@ -423,6 +438,7 @@ async function lsLoadAiSettings() {
     } catch {
         return null;
     }
+    if (isFallbackDeletion(parsed)) return null;
     if (isEnvelope(parsed)) {
         const plain = await decryptEncryptedPayload(AI_SETTINGS_STORE, parsed);
         if (plain === null) return null;
@@ -432,10 +448,11 @@ async function lsLoadAiSettings() {
     return isObjectRecord(parsed) ? parsed : null;
 }
 
-async function lsSaveAiSettings(settings) {
+async function lsSaveAiSettings(settings, { fallbackAuthority = false } = {}) {
     assertKeyReady();
     const env = await fpCrypto.encryptPayload(AI_SETTINGS_STORE, settings);
-    localStorage.setItem(LS_AI_SETTINGS_KEY, JSON.stringify(envelopeRecord(AI_SETTINGS_STORE, env)));
+    const record = envelopeRecord(AI_SETTINGS_STORE, env);
+    localStorage.setItem(LS_AI_SETTINGS_KEY, JSON.stringify(fallbackAuthority ? markFallbackAuthority(record) : record));
 }
 
 async function lsLoadSettings() {
@@ -447,6 +464,7 @@ async function lsLoadSettings() {
     } catch {
         return null;
     }
+    if (isFallbackDeletion(parsed)) return null;
     if (isEnvelope(parsed)) {
         const plain = await decryptEncryptedPayload(SETTINGS_STORE, parsed);
         if (plain === null) return null;
@@ -456,10 +474,33 @@ async function lsLoadSettings() {
     return isObjectRecord(parsed) ? parsed : null;
 }
 
-async function lsSaveSettings(settings) {
+async function lsSaveSettings(settings, { fallbackAuthority = false } = {}) {
     assertKeyReady();
     const env = await fpCrypto.encryptPayload(SETTINGS_STORE, settings);
-    localStorage.setItem(LS_SETTINGS_KEY, JSON.stringify(envelopeRecord(SETTINGS_STORE, env)));
+    const record = envelopeRecord(SETTINGS_STORE, env);
+    localStorage.setItem(LS_SETTINGS_KEY, JSON.stringify(fallbackAuthority ? markFallbackAuthority(record) : record));
+}
+
+async function reconcileFallbackAuthority(db, store, lsKey, loadFallback, writeIdb, { clearMirror = false } = {}) {
+    const record = fallbackAuthorityRecord(lsKey);
+    if (!record) return false;
+
+    if (isFallbackDeletion(record)) {
+        await idbReplaceAllRaw(db, store, null);
+    } else {
+        const payload = await loadFallback();
+        await writeIdb(payload);
+    }
+
+    // The marker is removed only after the IDB transaction has completed. If this
+    // localStorage operation fails, retrying the same authoritative envelope is safe.
+    if (clearMirror) {
+        localStorage.removeItem(lsKey);
+    } else {
+        const { [FALLBACK_AUTHORITY_FIELD]: _authority, ...mirror } = record;
+        localStorage.setItem(lsKey, JSON.stringify(mirror));
+    }
+    return true;
 }
 
 // --- Migración localStorage → IndexedDB (legacy v6) ----------------------------
@@ -573,6 +614,10 @@ async function migrateEncryption(db) {
     for (const plan of MIGRATION_PLAN) {
         const { store, lsKey, aad, mode } = plan;
 
+        // A fallback marker means LS has a newer committed write. Its owner load
+        // reconciles it before any migration can inspect or purge this store.
+        if (fallbackAuthorityRecord(lsKey)) continue;
+
         // Leer estado raw actual (sin descifrar)
         const rows = await rawGetAll(db, store);
 
@@ -628,6 +673,7 @@ async function migrateLsKeysWhenIdbDown() {
         } catch {
             continue;
         }
+        if (isFallbackDeletion(parsed)) continue;
         if (isEnvelope(parsed)) continue; // ya migrado
 
         // Cifrar in-place con read-back verify
@@ -782,9 +828,17 @@ async function load() {
     }
 
     try {
+        const reconciledFallback = await reconcileFallbackAuthority(
+            db,
+            STORE_NAME,
+            LS_KEY,
+            lsLoad,
+            payload => idbReplaceAll(db, STORE_NAME, payload),
+            { clearMirror: true },
+        );
         // ¿Necesita migración legacy localStorage→IDB?
         const migrated = localStorage.getItem(LS_MIGRATED_KEY);
-        if (!migrated) {
+        if (!migrated && !reconciledFallback) {
             await migrateFromLS(db);
         }
 
@@ -803,7 +857,7 @@ async function save(entries) {
     assertKeyReady(); // gate: sin clave resuelta no hay escritura
     if (!isIDBAvailable()) {
         // Modo degradado intencional: sin IDB no hay espejo que diverja
-        await lsSave(entries);
+        await lsSave(entries, { fallbackAuthority: true });
         return;
     }
 
@@ -812,6 +866,7 @@ async function save(entries) {
     const db = await openDB();
     try {
         await idbReplaceAll(db, STORE_NAME, entries);
+        localStorage.removeItem(LS_KEY);
     } finally {
         db.close();
     }
@@ -819,15 +874,46 @@ async function save(entries) {
 
 async function clear() {
     if (!isIDBAvailable()) {
-        lsClear();
+        lsClear({ fallbackAuthority: true });
         return;
     }
 
     const db = await openDB();
     try {
         await idbClear(db);
+        localStorage.removeItem(LS_KEY);
     } finally {
         db.close();
+    }
+}
+
+function markFallbackAuthority(record) {
+    return { ...record, [FALLBACK_AUTHORITY_FIELD]: FALLBACK_AUTHORITY_VERSION };
+}
+
+function fallbackDeletionRecord() {
+    return {
+        [FALLBACK_AUTHORITY_FIELD]: FALLBACK_AUTHORITY_VERSION,
+        [FALLBACK_DELETION_FIELD]: true,
+    };
+}
+
+function isFallbackDeletion(record) {
+    return !!record && record[FALLBACK_AUTHORITY_FIELD] === FALLBACK_AUTHORITY_VERSION
+        && record[FALLBACK_DELETION_FIELD] === true;
+}
+
+function fallbackAuthorityRecord(lsKey) {
+    const raw = localStorage.getItem(lsKey);
+    if (!raw) return null;
+    try {
+        const record = JSON.parse(raw);
+        return record && record[FALLBACK_AUTHORITY_FIELD] === FALLBACK_AUTHORITY_VERSION
+            && (isEnvelope(record) || isFallbackDeletion(record))
+            ? record
+            : null;
+    } catch {
+        return null;
     }
 }
 
@@ -841,6 +927,14 @@ async function loadBudgets() {
     try {
         const db = await openDB();
         try {
+            await reconcileFallbackAuthority(
+                db,
+                BUDGETS_STORE,
+                LS_BUDGETS_KEY,
+                lsLoadBudgets,
+                budgets => idbReplaceAll(db, BUDGETS_STORE, Object.entries(budgets).map(([categoria, monto]) => ({ categoria, monto }))),
+                { clearMirror: true },
+            );
             const budgets = await idbGetAllBudgets(db);
             // Convertir array de {categoria, monto} a objeto {categoria: monto}
             const result = {};
@@ -858,7 +952,7 @@ async function loadBudgets() {
 async function saveBudgets(budgets) {
     if (!isIDBAvailable()) {
         // Modo degradado intencional: sin IDB no hay espejo que diverja
-        await lsSaveBudgets(budgets);
+        await lsSaveBudgets(budgets, { fallbackAuthority: true });
         return;
     }
 
@@ -868,6 +962,7 @@ async function saveBudgets(budgets) {
         // Convertir objeto {categoria: monto} a array de {categoria, monto}
         const arr = Object.entries(budgets).map(([categoria, monto]) => ({ categoria, monto }));
         await idbReplaceAll(db, BUDGETS_STORE, arr);
+        localStorage.removeItem(LS_BUDGETS_KEY);
     } finally {
         db.close();
     }
@@ -883,6 +978,14 @@ async function loadRecurring() {
     try {
         const db = await openDB();
         try {
+            await reconcileFallbackAuthority(
+                db,
+                RECURRING_STORE,
+                LS_RECURRING_KEY,
+                lsLoadRecurring,
+                payload => idbReplaceAll(db, RECURRING_STORE, payload),
+                { clearMirror: true },
+            );
             const recurring = await idbGetAllRecurring(db);
             return recurring;
         } finally {
@@ -897,7 +1000,7 @@ async function loadRecurring() {
 async function saveRecurring(recurring) {
     if (!isIDBAvailable()) {
         // Modo degradado intencional: sin IDB no hay espejo que diverja
-        await lsSaveRecurring(recurring);
+        await lsSaveRecurring(recurring, { fallbackAuthority: true });
         return;
     }
 
@@ -905,6 +1008,7 @@ async function saveRecurring(recurring) {
     const db = await openDB();
     try {
         await idbReplaceAll(db, RECURRING_STORE, recurring);
+        localStorage.removeItem(LS_RECURRING_KEY);
     } finally {
         db.close();
     }
@@ -920,6 +1024,14 @@ async function loadCustomCategories() {
     try {
         const db = await openDB();
         try {
+            await reconcileFallbackAuthority(
+                db,
+                CUSTOM_CATEGORIES_STORE,
+                LS_CUSTOM_CATEGORIES_KEY,
+                lsLoadCustomCategories,
+                payload => idbReplaceAll(db, CUSTOM_CATEGORIES_STORE, payload),
+                { clearMirror: true },
+            );
             return await idbGetAllCustomCategories(db);
         } finally {
             db.close();
@@ -933,7 +1045,7 @@ async function loadCustomCategories() {
 async function saveCustomCategories(categories) {
     if (!isIDBAvailable()) {
         // Modo degradado intencional: sin IDB no hay espejo que diverja
-        await lsSaveCustomCategories(categories);
+        await lsSaveCustomCategories(categories, { fallbackAuthority: true });
         return;
     }
 
@@ -941,6 +1053,7 @@ async function saveCustomCategories(categories) {
     const db = await openDB();
     try {
         await idbReplaceAll(db, CUSTOM_CATEGORIES_STORE, categories);
+        localStorage.removeItem(LS_CUSTOM_CATEGORIES_KEY);
     } finally {
         db.close();
     }
@@ -956,6 +1069,13 @@ async function loadAiSettings() {
     try {
         const db = await openDB();
         try {
+            await reconcileFallbackAuthority(
+                db,
+                AI_SETTINGS_STORE,
+                LS_AI_SETTINGS_KEY,
+                lsLoadAiSettings,
+                payload => idbPutAiSettings(db, payload),
+            );
             return await idbGetAiSettings(db);
         } finally {
             db.close();
@@ -970,7 +1090,7 @@ async function saveAiSettings(settings) {
     if (!settings) {
         // Clear settings
         if (!isIDBAvailable()) {
-            localStorage.removeItem(LS_AI_SETTINGS_KEY);
+            localStorage.setItem(LS_AI_SETTINGS_KEY, JSON.stringify(fallbackDeletionRecord()));
             return;
         }
         const db = await openDB();
@@ -992,8 +1112,7 @@ async function saveAiSettings(settings) {
 
     if (!isIDBAvailable()) {
         // Modo degradado intencional: sin IDB no hay espejo que diverja
-        const rec = await encryptAndRecord(AI_SETTINGS_STORE, record);
-        localStorage.setItem(LS_AI_SETTINGS_KEY, JSON.stringify(rec));
+        await lsSaveAiSettings(record, { fallbackAuthority: true });
         return;
     }
 
@@ -1020,6 +1139,13 @@ async function loadCurrencySettings() {
     try {
         const db = await openDB();
         try {
+            await reconcileFallbackAuthority(
+                db,
+                SETTINGS_STORE,
+                LS_SETTINGS_KEY,
+                lsLoadSettings,
+                payload => idbPutSettings(db, payload),
+            );
             return await idbGetSettings(db);
         } finally {
             db.close();
@@ -1034,7 +1160,7 @@ async function saveCurrencySettings(settings) {
     if (!settings) {
         // Clear settings
         if (!isIDBAvailable()) {
-            localStorage.removeItem(LS_SETTINGS_KEY);
+            localStorage.setItem(LS_SETTINGS_KEY, JSON.stringify(fallbackDeletionRecord()));
             return;
         }
         const db = await openDB();
@@ -1056,8 +1182,7 @@ async function saveCurrencySettings(settings) {
 
     if (!isIDBAvailable()) {
         // Modo degradado intencional: sin IDB no hay espejo que diverja
-        const rec = await encryptAndRecord(SETTINGS_STORE, record);
-        localStorage.setItem(LS_SETTINGS_KEY, JSON.stringify(rec));
+        await lsSaveSettings(record, { fallbackAuthority: true });
         return;
     }
 
@@ -1076,7 +1201,7 @@ async function saveCurrencySettings(settings) {
 
 async function clearCurrencySettings() {
     if (!isIDBAvailable()) {
-        localStorage.removeItem(LS_SETTINGS_KEY);
+        localStorage.setItem(LS_SETTINGS_KEY, JSON.stringify(fallbackDeletionRecord()));
         return;
     }
 

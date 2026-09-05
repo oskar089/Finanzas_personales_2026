@@ -327,7 +327,10 @@ describe('storage.clear()', () => {
         try {
             await storage.save(sampleEntries);
             await storage.clear();
-            expect(localStorage.getItem('finanzas:gastos:v1')).toBeNull();
+            expect(JSON.parse(localStorage.getItem('finanzas:gastos:v1'))).toMatchObject({
+                __fallbackAuthority: 1,
+                __fallbackDeletion: true,
+            });
         } finally {
             globalThis.indexedDB = originalIndexedDB;
         }
@@ -530,7 +533,10 @@ describe('storage.saveAiSettings() / loadAiSettings()', () => {
         try {
             await storage.saveAiSettings(sampleAiSettings);
             await storage.saveAiSettings(null);
-            expect(localStorage.getItem('finanzas:ai-settings:v1')).toBeNull();
+            expect(JSON.parse(localStorage.getItem('finanzas:ai-settings:v1'))).toMatchObject({
+                __fallbackAuthority: 1,
+                __fallbackDeletion: true,
+            });
         } finally {
             globalThis.indexedDB = originalIndexedDB;
         }
@@ -669,11 +675,17 @@ describe('storage.saveCurrencySettings() / loadCurrencySettings()', () => {
         try {
             await storage.saveCurrencySettings(sampleCurrencySettings);
             await storage.saveCurrencySettings(null);
-            expect(localStorage.getItem('finanzas:settings:v1')).toBeNull();
+            expect(JSON.parse(localStorage.getItem('finanzas:settings:v1'))).toMatchObject({
+                __fallbackAuthority: 1,
+                __fallbackDeletion: true,
+            });
 
             await storage.saveCurrencySettings(sampleCurrencySettings);
             await storage.clearCurrencySettings();
-            expect(localStorage.getItem('finanzas:settings:v1')).toBeNull();
+            expect(JSON.parse(localStorage.getItem('finanzas:settings:v1'))).toMatchObject({
+                __fallbackAuthority: 1,
+                __fallbackDeletion: true,
+            });
         } finally {
             globalThis.indexedDB = originalIndexedDB;
         }
@@ -956,6 +968,83 @@ describe('storage: DE11/DE15 espejos idénticos y fallback LS puro', () => {
     });
 });
 
+// -------------------------------------------------------------------
+// Fallback authority and recovery reconciliation
+// -------------------------------------------------------------------
+describe('storage: fallback authority reconciliation', () => {
+    const FALLBACK_AUTHORITY_FIELD = '__fallbackAuthority';
+
+    it('prefers a successful LS-only entries write over stale IDB, then reconciles and clears the fallback authority', async () => {
+        const stale = [{ ...sampleEntries[0], id: 'stale-entry' }];
+        const newer = [{ ...sampleEntries[1], id: 'fallback-entry' }];
+        await storage.save(stale);
+
+        const originalIndexedDB = globalThis.indexedDB;
+        globalThis.indexedDB = undefined;
+        try {
+            await storage.save(newer);
+            expect(JSON.parse(localStorage.getItem('finanzas:gastos:v1'))[FALLBACK_AUTHORITY_FIELD]).toBe(1);
+        } finally {
+            globalThis.indexedDB = originalIndexedDB;
+        }
+
+        await expect(storage.load()).resolves.toEqual(newer);
+        expect(localStorage.getItem('finanzas:gastos:v1')).toBeNull();
+    });
+
+    it.each([
+        ['budgets', 'finanzas:budgets:v1', () => storage.saveBudgets({ Stale: 1 }), () => storage.saveBudgets({ Newer: 2 }), () => storage.loadBudgets(), result => expect(result).toEqual({ Newer: 2 })],
+        ['recurring', 'finanzas:recurring:v1', () => storage.saveRecurring([{ id: 'stale', nombre: 'Stale' }]), () => storage.saveRecurring([{ id: 'newer', nombre: 'Newer' }]), () => storage.loadRecurring(), result => expect(result).toEqual([{ id: 'newer', nombre: 'Newer' }])],
+        ['custom categories', 'finanzas:custom-categories:v1', () => storage.saveCustomCategories([{ nombre: 'Stale' }]), () => storage.saveCustomCategories([{ nombre: 'Newer' }]), () => storage.loadCustomCategories(), result => expect(result).toEqual([{ nombre: 'Newer' }])],
+        ['AI settings', 'finanzas:ai-settings:v1', () => storage.saveAiSettings({ provider: 'stale' }), () => storage.saveAiSettings({ provider: 'newer' }), () => storage.loadAiSettings(), result => expect(result).toMatchObject({ provider: 'newer', id: 'active' })],
+        ['currency settings', 'finanzas:settings:v1', () => storage.saveCurrencySettings({ baseCurrency: 'USD', displayCurrency: 'EUR' }), () => storage.saveCurrencySettings({ baseCurrency: 'USD', displayCurrency: 'GBP' }), () => storage.loadCurrencySettings(), result => expect(result).toMatchObject({ displayCurrency: 'GBP', id: 'active' })],
+    ])('reconciles the newer LS-only %s state before its healthy-IDB load', async (_label, lsKey, saveStale, saveNewer, load, assertLoaded) => {
+        await saveStale();
+
+        const originalIndexedDB = globalThis.indexedDB;
+        globalThis.indexedDB = undefined;
+        try {
+            await saveNewer();
+            expect(JSON.parse(localStorage.getItem(lsKey))[FALLBACK_AUTHORITY_FIELD]).toBe(1);
+        } finally {
+            globalThis.indexedDB = originalIndexedDB;
+        }
+
+        assertLoaded(await load());
+        const remaining = localStorage.getItem(lsKey);
+        if (remaining) {
+            expect(JSON.parse(remaining)[FALLBACK_AUTHORITY_FIELD]).toBeUndefined();
+        }
+    });
+
+    it('keeps the LS authority marker and prior IDB data when reconciliation aborts', async () => {
+        const stale = [{ ...sampleEntries[0], id: 'stale-entry' }];
+        const newer = [{ ...sampleEntries[1], id: 'fallback-entry' }];
+        await storage.save(stale);
+        const db = await openRawDb();
+        const priorIdb = await idbGetAllRaw(db, 'entries');
+
+        const originalIndexedDB = globalThis.indexedDB;
+        globalThis.indexedDB = undefined;
+        try {
+            await storage.save(newer);
+        } finally {
+            globalThis.indexedDB = originalIndexedDB;
+        }
+
+        const putSpy = abortWritesFor('entries');
+        try {
+            await expect(storage.load()).rejects.toThrow('Injected write failure');
+        } finally {
+            putSpy.mockRestore();
+        }
+
+        expect(await idbGetAllRaw(db, 'entries')).toEqual(priorIdb);
+        expect(JSON.parse(localStorage.getItem('finanzas:gastos:v1'))[FALLBACK_AUTHORITY_FIELD]).toBe(1);
+        await expect(storage.load()).resolves.toEqual(newer);
+    });
+});
+
 // ============================================================================
 // Phase 3: Migración v6→v7 (seeded legacy suite)
 // ============================================================================
@@ -1152,6 +1241,34 @@ describe('storage: migración v6→v7 purge-after-verify (DE12)', () => {
             { id: 'e2', tipo: 'income', monto: 2000, categoria: 'Sueldo', descripcion: 'Sueldo agosto', fecha: '2026-08-05' }
         ]);
         expect(localStorage.getItem('finanzas:gastos:v1')).toBeTruthy();
+    });
+
+    it('clears and replaces legacy entries in the same readwrite transaction', { timeout: 30000 }, async () => {
+        await seedLegacyV6();
+        await storage.initKey(TEST_PASSPHRASE);
+        let replacementTransaction = null;
+        let replacementPutWasAtomic = false;
+        const originalClear = IDBObjectStore.prototype.clear;
+        const originalPut = IDBObjectStore.prototype.put;
+        const clearSpy = vi.spyOn(IDBObjectStore.prototype, 'clear').mockImplementation(function () {
+            if (this.name === 'entries') replacementTransaction = this.transaction;
+            return originalClear.call(this);
+        });
+        const putSpy = vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(function (record, key) {
+            if (this.name === 'entries' && replacementTransaction) {
+                replacementPutWasAtomic ||= this.transaction === replacementTransaction;
+            }
+            return originalPut.call(this, record, key);
+        });
+
+        try {
+            await storage.load();
+        } finally {
+            putSpy.mockRestore();
+            clearSpy.mockRestore();
+        }
+
+        expect(replacementPutWasAtomic).toBe(true);
     });
 });
 
