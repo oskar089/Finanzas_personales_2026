@@ -348,7 +348,9 @@ async function lsLoad() {
     try {
         parsed = JSON.parse(raw);
     } catch {
-        return [];
+        // Corrupción ≠ ausencia: la clave EXISTE pero es ilegible. Devolver []
+        // permitiría que el próximo save sobreescriba el dato bueno.
+        throw new StorageReadError();
     }
     if (isFallbackDeletion(parsed)) return [];
     if (isEnvelope(parsed)) {
@@ -381,7 +383,7 @@ async function lsLoadBudgets() {
     try {
         parsed = JSON.parse(raw);
     } catch {
-        return {};
+        throw new StorageReadError();
     }
     if (isFallbackDeletion(parsed)) return {};
     if (isEnvelope(parsed)) {
@@ -406,7 +408,7 @@ async function lsLoadRecurring() {
     try {
         parsed = JSON.parse(raw);
     } catch {
-        return [];
+        throw new StorageReadError();
     }
     if (isFallbackDeletion(parsed)) return [];
     if (isEnvelope(parsed)) {
@@ -431,7 +433,7 @@ async function lsLoadCustomCategories() {
     try {
         parsed = JSON.parse(raw);
     } catch {
-        return [];
+        throw new StorageReadError();
     }
     if (isFallbackDeletion(parsed)) return [];
     if (isEnvelope(parsed)) {
@@ -456,7 +458,7 @@ async function lsLoadAiSettings() {
     try {
         parsed = JSON.parse(raw);
     } catch {
-        return null;
+        throw new StorageReadError();
     }
     if (isFallbackDeletion(parsed)) return null;
     if (isEnvelope(parsed)) {
@@ -482,7 +484,7 @@ async function lsLoadSettings() {
     try {
         parsed = JSON.parse(raw);
     } catch {
-        return null;
+        throw new StorageReadError();
     }
     if (isFallbackDeletion(parsed)) return null;
     if (isEnvelope(parsed)) {

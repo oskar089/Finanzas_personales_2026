@@ -1582,4 +1582,16 @@ describe('storage.* fail-closed en lectura (StorageReadError)', () => {
             readSpy.mockRestore();
         }
     });
+
+    it('corrupción LS ≠ ausencia: con IDB caído, una clave corrupta lanza StorageReadError', async () => {
+        localStorage.setItem('finanzas:gastos:v1', '{not-json');
+        const original = globalThis.indexedDB;
+        globalThis.indexedDB = undefined;
+        try {
+            await expect(storage.load()).rejects.toBeInstanceOf(storage.StorageReadError);
+        } finally {
+            globalThis.indexedDB = original;
+            localStorage.removeItem('finanzas:gastos:v1');
+        }
+    });
 });
