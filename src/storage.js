@@ -521,10 +521,12 @@ function rawGetAll(db, storeName) {
     });
 }
 
-function rawPut(db, storeName, record) {
+function rawPut(db, storeName, record, { replace = false } = {}) {
     return new Promise((resolve, reject) => {
         const tx = db.transaction(storeName, 'readwrite');
-        tx.objectStore(storeName).put(record);
+        const store = tx.objectStore(storeName);
+        if (replace) store.clear();
+        store.put(record);
         tx.oncomplete = () => resolve();
         tx.onerror = () => reject(tx.error);
     });
@@ -600,9 +602,8 @@ async function migrateEncryption(db) {
             throw new MigrationVerifyError(`Migration verify failed for store ${store}`);
         }
 
-        // Purga legacy: solo un envelope por store
-        await rawClear(db, store);
-        await rawPut(db, store, rec);
+        // Atomically replace legacy rows with the verified envelope.
+        await rawPut(db, store, rec, { replace: true });
 
         // Modo dual: migrar espejo LS (read-back verify incluido en migrateLsKey)
         if (mode === 'dual') {

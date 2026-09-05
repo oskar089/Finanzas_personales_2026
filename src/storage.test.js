@@ -65,6 +65,29 @@ function abortWritesFor(storeName) {
     });
 }
 
+function abortWritesAfterClearFor(storeName) {
+    let clearStarted = false;
+    const originalClear = IDBObjectStore.prototype.clear;
+    const clearSpy = vi.spyOn(IDBObjectStore.prototype, 'clear').mockImplementation(function () {
+        if (this.name === storeName) clearStarted = true;
+        return originalClear.call(this);
+    });
+    const originalPut = IDBObjectStore.prototype.put;
+    const putSpy = vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(function (record, key) {
+        if (this.name === storeName && clearStarted) {
+            this.transaction.abort();
+            throw new DOMException('Injected replacement failure', 'AbortError');
+        }
+        return originalPut.call(this, record, key);
+    });
+    return {
+        restore() {
+            putSpy.mockRestore();
+            clearSpy.mockRestore();
+        }
+    };
+}
+
 // Limpiar entre tests (gate primero, luego clear: nunca borrar antes de resolver la clave)
 beforeEach(async () => {
     // initKey es idempotente: la primera llamada deriva y persiste el meta; las
@@ -977,6 +1000,27 @@ describe('storage: migración v6→v7 purge-after-verify (DE12)', () => {
         const rows = await rawGetAll(db, 'entries');
         expect(rows).toHaveLength(1);
         expect(isEnvelopeLike(rows[0])).toBe(true);
+    });
+
+    it('keeps the prior dataset when the replacement write fails after clearing legacy rows', { timeout: 30000 }, async () => {
+        await seedLegacyV6();
+        await storage.initKey(TEST_PASSPHRASE);
+        const writes = abortWritesAfterClearFor('entries');
+
+        try {
+            await expect(storage.load()).rejects.toThrow('Injected replacement failure');
+        } finally {
+            writes.restore();
+        }
+
+        const db = await openRawDb();
+        const rows = await rawGetAll(db, 'entries');
+        const legacyRows = rows.filter(row => !isEnvelopeLike(row));
+        expect(legacyRows).toEqual([
+            { id: 'e1', tipo: 'expense', monto: 100, categoria: 'Comida', descripcion: 'Almuerzo', fecha: '2026-08-01' },
+            { id: 'e2', tipo: 'income', monto: 2000, categoria: 'Sueldo', descripcion: 'Sueldo agosto', fecha: '2026-08-05' }
+        ]);
+        expect(localStorage.getItem('finanzas:gastos:v1')).toBeTruthy();
     });
 });
 
