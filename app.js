@@ -181,6 +181,7 @@ async function addCustomCategory() {
         return;
     }
 
+    const prev = customCategories;
     customCategories = [...customCategories, {
         nombre,
         tipo: tipoSelect.value,
@@ -188,17 +189,34 @@ async function addCustomCategory() {
     }];
 
     nameInput.value = '';
-    await persistCustomCategories();
+    try {
+        await persistCustomCategories();
+    } catch (err) {
+        // Rollback: sin esto el próximo render pinta la categoría no guardada.
+        customCategories = prev;
+        console.error('No se pudo guardar la categoría.', err);
+        toast.showError('No se pudo guardar la categoría.');
+        return;
+    }
     renderManageCategoriesModal();
     refreshAfterCategoryChange();
     toast.showSuccess(`Categoría "${nombre}" agregada.`);
 }
 
 async function deleteCustomCategory(nombre) {
+    const prev = customCategories;
     customCategories = customCategories.filter(
         c => c.nombre.toLowerCase() !== nombre.toLowerCase()
     );
-    await persistCustomCategories();
+    try {
+        await persistCustomCategories();
+    } catch (err) {
+        // Rollback: sin esto el próximo render pinta el borrado no guardado.
+        customCategories = prev;
+        console.error('No se pudo borrar la categoría.', err);
+        toast.showError('No se pudo borrar la categoría.');
+        return;
+    }
     renderManageCategoriesModal();
     refreshAfterCategoryChange();
     toast.showSuccess(`Categoría "${nombre}" eliminada.`);
@@ -392,7 +410,13 @@ function setupAiSettingsModal() {
             return;
         }
 
-        await storage.saveAiSettings(settings);
+        try {
+            await storage.saveAiSettings(settings);
+        } catch (err) {
+            console.error('No se pudieron guardar las configuraciones de IA.', err);
+            toast.showError('No se pudo guardar la configuración de IA.');
+            return;
+        }
         aiSettings = settings;
         bootstrap.Modal.getInstance(modalEl).hide();
         toast.showSuccess('Configuración de IA guardada.');
@@ -785,26 +809,50 @@ async function addEntry({ tipo, amount, category, subcategory, description, date
         descripcion: description.trim(),
         fecha: date
     };
+    const prev = entries;
     entries = [...entries, newEntry];
-    await saveToStorage();
-    render();
+    try {
+        await saveToStorage();
+        render();
+    } catch (err) {
+        // Rollback: sin esto el próximo render pinta lo no guardado y un reintento duplica.
+        entries = prev;
+        console.error('No se pudo guardar el movimiento.', err);
+        toast.showError('No se pudo guardar el movimiento. Tu cambio NO se guardó.');
+    }
 }
 
 async function updateEntry({ id, tipo, amount, category, subcategory, description, date }) {
+    const prev = entries;
     entries = entries.map(e =>
         e.id === id
             ? { ...e, tipo, monto: parseAmount(amount), categoria: category, subcategoria: subcategory || '', descripcion: description.trim(), fecha: date }
             : e
     );
-    await saveToStorage();
-    render();
+    try {
+        await saveToStorage();
+        render();
+    } catch (err) {
+        // Rollback: sin esto el próximo render pinta la edición no guardada.
+        entries = prev;
+        console.error('No se pudo guardar el movimiento.', err);
+        toast.showError('No se pudo guardar el movimiento. Tu cambio NO se guardó.');
+    }
 }
 
 async function deleteEntry(id) {
     if (!confirm('¿Borrar este movimiento?')) return;
+    const prev = entries;
     entries = entries.filter(e => e.id !== id);
-    await saveToStorage();
-    render();
+    try {
+        await saveToStorage();
+        render();
+    } catch (err) {
+        // Rollback: sin esto el próximo render pinta el borrado no guardado.
+        entries = prev;
+        console.error('No se pudo borrar el movimiento.', err);
+        toast.showError('No se pudo borrar el movimiento. Tu borrado NO se guardó.');
+    }
 }
 
 // --- Filtros ------------------------------------------------------
@@ -909,6 +957,7 @@ async function saveInlineEdit(entryId) {
     }
 
     // Actualizar entry de forma inmutable
+    const prev = entries;
     entries = entries.map(e =>
         e.id === entryId
             ? { ...e, fecha: result.fecha, tipo: result.tipo, categoria: result.categoria, subcategoria: result.subcategoria, descripcion: result.descripcion, monto: result.monto }
@@ -918,8 +967,16 @@ async function saveInlineEdit(entryId) {
     inlineEditingId = null;
     inlineEditField = null;
 
-    await saveToStorage();
-    render();
+    try {
+        await saveToStorage();
+        render();
+    } catch (err) {
+        // Rollback: restaurar la entry y re-render para que el DOM no muestre lo no guardado.
+        entries = prev;
+        console.error('No se pudo guardar el movimiento.', err);
+        toast.showError('No se pudo guardar el movimiento. Tu cambio NO se guardó.');
+        render();
+    }
 }
 
 // Genera el HTML para una celda editable (input inline)
@@ -1532,11 +1589,19 @@ function setupBudgetModal() {
                 newBudgets[cat] = parseAmount(val);
             }
         });
+        const prev = budgets;
         budgets = newBudgets;
-        await storage.saveBudgets(budgets);
-        renderBudgets();
-        render(); // actualiza badges en tabla
-        bootstrap.Modal.getInstance(document.getElementById('budgetModal')).hide();
+        try {
+            await storage.saveBudgets(budgets);
+            renderBudgets();
+            render(); // actualiza badges en tabla
+            bootstrap.Modal.getInstance(document.getElementById('budgetModal')).hide();
+        } catch (err) {
+            // Rollback: sin esto el próximo render pinta presupuestos no guardados.
+            budgets = prev;
+            console.error('No se pudieron guardar los presupuestos.', err);
+            toast.showError('No se pudieron guardar los presupuestos.');
+        }
     };
 }
 
@@ -1686,10 +1751,18 @@ function setupRecurringModal() {
                 activo: true
             };
 
+            const prev = recurring;
             recurring = [...recurring, newRecurring];
-            await storage.saveRecurring(recurring);
-            renderRecurring();
-            div.remove();
+            try {
+                await storage.saveRecurring(recurring);
+                renderRecurring();
+                div.remove();
+            } catch (err) {
+                // Rollback: sin esto el próximo render pinta el recurrente no guardado.
+                recurring = prev;
+                console.error('No se pudo guardar el recurrente.', err);
+                toast.showError('No se pudo guardar el recurrente.');
+            }
         };
 
         div.querySelector('.cancel-recurring').onclick = () => div.remove();
@@ -1844,8 +1917,17 @@ function importXLSX(file) {
             const msg = `¿Reemplazar todos los datos actuales (${entries.length} movimientos) con los del archivo (${incoming.length} movimientos)?${skipNote}`;
             if (!confirm(msg)) return;
 
+            const prev = entries;
             entries = incoming;
-            await saveToStorage();
+            try {
+                await saveToStorage();
+            } catch (err) {
+                // Rollback: la importación falló, no tocar los datos actuales.
+                entries = prev;
+                console.error('No se pudo guardar la importación.', err);
+                toast.showError('No se pudo guardar la importación. Tus datos actuales quedan intactos.');
+                return;
+            }
             render();
             toast.showSuccess(`Importados ${incoming.length} movimientos correctamente.${skipNote}`);
         } catch (err) {
@@ -2034,20 +2116,38 @@ async function init() {
             const id = toggleBtn.dataset.id;
             const r = recurring.find(x => x.id === id);
             if (r) {
+                const prev = recurring;
                 recurring = recurring.map(x =>
                     x.id === id ? { ...x, activo: !x.activo } : x
                 );
-                await storage.saveRecurring(recurring);
-                renderRecurring();
+                try {
+                    await storage.saveRecurring(recurring);
+                    renderRecurring();
+                } catch (err) {
+                    // Rollback + re-render para que el toggle muestre el estado real.
+                    recurring = prev;
+                    console.error('No se pudo guardar el recurrente.', err);
+                    toast.showError('No se pudo guardar el recurrente.');
+                    renderRecurring();
+                }
             }
         }
 
         if (deleteBtn) {
             const id = deleteBtn.dataset.id;
             if (confirm('¿Eliminar este recurrente?')) {
+                const prev = recurring;
                 recurring = recurring.filter(x => x.id !== id);
-                await storage.saveRecurring(recurring);
-                renderRecurring();
+                try {
+                    await storage.saveRecurring(recurring);
+                    renderRecurring();
+                } catch (err) {
+                    // Rollback + re-render para que el borrado no se pinte.
+                    recurring = prev;
+                    console.error('No se pudo borrar el recurrente.', err);
+                    toast.showError('No se pudo borrar el recurrente.');
+                    renderRecurring();
+                }
             }
         }
     });
